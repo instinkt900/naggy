@@ -1,0 +1,15 @@
+# Naggy configuration. Copy to config.toml and edit.
+# Unknown keys/sections fail loudly at startup, so a typo won't be silently ignored.
+
+[database]
+# Path to the SQLite file. In Docker this is under the /data volume.
+path = "naggy.db"
+
+[web]
+host = "0.0.0.0"
+port = 8080
+# IANA timezone used for display and for calendar-based (month/year) intervals.
+timezone = "UTC"
+
+# There are no secrets today. A future Home Assistant token would come from the
+# environment only (NAGGY_HA_TOKEN), never from this file.

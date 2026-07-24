@@ -1,0 +1,50 @@
+<div id="board" class="board">
+  <section class="pending">
+    <h2>Pending actions {% if board.pending %}<span class="count">{{ board.pending|length }}</span>{% endif %}</h2>
+    {% if board.pending %}
+      <ul class="cards">
+        {% for r in board.pending %}
+          <li class="card is-pending">
+            <button class="card-tap"
+                    hx-post="/api/reminders/{{ r.id }}/complete"
+                    hx-target="#board" hx-swap="outerHTML"
+                    hx-confirm="Done with “{{ r.title }}”? {% if r.kind == 'recurring' %}It'll reset for next time.{% else %}It'll be removed.{% endif %}">
+              <span class="card-title">{{ r.title }}</span>
+              <span class="card-meta">{{ r.human }} · {{ r.interval_label }}</span>
+              {% if r.notes %}<span class="card-notes">{{ r.notes }}</span>{% endif %}
+            </button>
+            <button class="card-del" title="Delete"
+                    hx-delete="/api/reminders/{{ r.id }}"
+                    hx-target="#board" hx-swap="outerHTML"
+                    hx-confirm="Delete “{{ r.title }}” entirely?">✕</button>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">Nothing needs doing right now. 🎉</p>
+    {% endif %}
+  </section>
+
+  <section class="upcoming">
+    <h2>Upcoming</h2>
+    {% if board.upcoming %}
+      <ul class="cards">
+        {% for r in board.upcoming %}
+          <li class="card">
+            <div class="card-body">
+              <span class="card-title">{{ r.title }}</span>
+              <span class="card-meta">{{ r.human }} · {{ r.interval_label }}</span>
+              <span class="card-sub">{{ r.due_local }}</span>
+            </div>
+            <button class="card-del" title="Delete"
+                    hx-delete="/api/reminders/{{ r.id }}"
+                    hx-target="#board" hx-swap="outerHTML"
+                    hx-confirm="Delete “{{ r.title }}” entirely?">✕</button>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">No reminders yet — add one below.</p>
+    {% endif %}
+  </section>
+</div>

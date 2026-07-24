@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block body_class %}phone{% endblock %}
+
+{% block content %}
+<header class="app-header">
+  <h1>Naggy</h1>
+  <p class="tagline">Your chores, on a timer.</p>
+</header>
+
+<main>
+  {% include "partials/board.html" %}
+
+  <section class="add">
+    <h2>Add a reminder</h2>
+    <form id="add-form"
+          hx-post="/api/reminders"
+          hx-target="#board" hx-swap="outerHTML"
+          hx-on::after-request="if(event.detail.successful) this.reset()">
+      <label class="field">
+        <span>What needs doing?</span>
+        <input type="text" name="title" placeholder="Clean bedsheets" required autocomplete="off">
+      </label>
+
+      <fieldset class="kind">
+        <label><input type="radio" name="kind" value="recurring" checked> Repeats</label>
+        <label><input type="radio" name="kind" value="oneshot"> One-time</label>
+      </fieldset>
+
+      <div class="field interval">
+        <span id="interval-lead">Every</span>
+        <input type="number" name="interval_n" value="2" min="1" inputmode="numeric" required>
+        <select name="interval_unit">
+          {% for u in units %}
+            <option value="{{ u }}" {% if u == 'week' %}selected{% endif %}>{{ u }}(s)</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <label class="field">
+        <span>Notes (optional)</span>
+        <input type="text" name="notes" placeholder="Hot wash, line dry" autocomplete="off">
+      </label>
+
+      <button type="submit" class="primary">Add reminder</button>
+    </form>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/phone.js" defer></script>
+{% endblock %}

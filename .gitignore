@@ -1,0 +1,13 @@
+# Real config and data are never tracked; only *.example files are.
+config.toml
+docker/.env
+docker/config.toml
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+*.pyc

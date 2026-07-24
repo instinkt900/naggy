@@ -1,0 +1,26 @@
+[project]
+name = "naggy"
+version = "0.1.0"
+description = "Phone-first reminder app for recurring and one-off household chores: define a chore and its cadence, get a pending-actions list, tap to mark done."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+]
+
+[project.scripts]
+naggy = "naggy.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+    "naggy",
+]
+
+[tool.setuptools.package-data]
+naggy = ["templates/**/*.html", "static/**/*"]

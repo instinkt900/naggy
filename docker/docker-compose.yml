@@ -1,0 +1,28 @@
+# Explicit project name so compose doesn't derive one from the parent directory.
+name: naggy
+
+services:
+  naggy:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: naggy
+    image: naggy
+    restart: always
+    # Container always listens on 8080; host port is configurable via docker/.env.
+    ports:
+      - "${NAGGY_PORT:-8090}:8080"
+    environment:
+      # Reserved for the future Home Assistant feed; empty is fine today.
+      NAGGY_HA_TOKEN: ${NAGGY_HA_TOKEN:-}
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - naggy-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/healthz').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  naggy-data:
