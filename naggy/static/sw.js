@@ -5,7 +5,7 @@
 // everything is network-first with a cache fallback. When online you always get
 // the latest code/markup; the cached shell only kicks in offline. Live data
 // (/api/, /healthz) is never cached. Bump CACHE to invalidate the shell.
-const CACHE = "naggy-v1";
+const CACHE = "naggy-v2";
 const SHELL = [
   "/",
   "/manifest.webmanifest",
