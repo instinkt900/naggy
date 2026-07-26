@@ -83,8 +83,28 @@ def create_app(config_path: str) -> FastAPI:
                 log.exception("notify pass failed")
 
     templates = Jinja2Templates(directory=str(_HERE / "templates"))
+    # Every template stamps `?v={{ v }}` onto its asset URLs, so a release always
+    # reaches clients even if something is holding an old copy.
+    templates.env.globals["v"] = __version__
     app = FastAPI(title="Naggy", version=__version__, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
+
+    @app.middleware("http")
+    async def revalidate_static(request: Request, call_next):
+        """Force the browser to revalidate every static asset.
+
+        StaticFiles sends ETag/Last-Modified but no Cache-Control, which leaves
+        Chrome free to reuse a heuristically-fresh copy without asking. Android
+        PWAs hit this hard: a reinstalled app kept running JS it had cached before
+        the deploy, and because the service worker's own `fetch()` reads the same
+        HTTP cache, bumping the SW cache version just re-pinned the stale file.
+        `no-cache` still allows caching — it only requires an ETag check first, so
+        the usual answer is a cheap 304.
+        """
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     # --- helpers (closures over cfg/db/tz) ----------------------------------
 

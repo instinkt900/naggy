@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
   <title>{% block title %}Naggy{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ v }}">
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#12141a">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13,16 +13,19 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Naggy">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
-  <script src="/static/htmx.min.js" defer></script>
-  <script src="/static/common.js" defer></script>
+  <script src="/static/htmx.min.js?v={{ v }}" defer></script>
+  <script src="/static/common.js?v={{ v }}" defer></script>
   {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
   {% block content %}{% endblock %}
   {% block scripts %}{% endblock %}
   <script>
+    // The ?v= is what the worker reads to name its cache and stamp asset URLs,
+    // and changing it is also what tells the browser this is a new worker.
     if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+      window.addEventListener("load", () =>
+        navigator.serviceWorker.register("/sw.js?v={{ v }}").catch(() => {}));
     }
   </script>
 </body>
