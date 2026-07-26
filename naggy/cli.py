@@ -1,9 +1,9 @@
 """Naggy command-line entrypoint.
 
 Subcommands: serve (web app), init-db (create schema and exit), report (print
-what's pending/upcoming, text or JSON — also the natural future home for a
-`notify` command). Imports are lazy per branch so a quick command doesn't drag in
-uvicorn/fastapi.
+what's pending/upcoming, text or JSON), notify (push for anything newly due),
+vapid-keys (mint a push signing key). Imports are lazy per branch so a quick
+command doesn't drag in uvicorn/fastapi — or, for `notify`, the crypto stack.
 """
 
 from __future__ import annotations
@@ -38,6 +38,13 @@ def main(argv: list[str] | None = None) -> int:
     p_report.add_argument("-c", "--config", required=True)
     p_report.add_argument("--json", action="store_true", help="emit JSON instead of text")
 
+    p_notify = sub.add_parser("notify", help="push a notification for newly-due reminders")
+    p_notify.add_argument("-c", "--config", required=True)
+    p_notify.add_argument("--dry-run", action="store_true",
+                          help="show what would be sent without sending or stamping")
+
+    sub.add_parser("vapid-keys", help="generate a VAPID keypair for push notifications")
+
     args = parser.parse_args(argv)
     _setup_logging(args.verbose)
 
@@ -56,7 +63,68 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "report":
         return _report(args.config, as_json=args.json)
 
+    if args.command == "notify":
+        return _notify(args.config, dry_run=args.dry_run)
+
+    if args.command == "vapid-keys":
+        return _vapid_keys()
+
     return 1
+
+
+def _notify(config_path: str, *, dry_run: bool) -> int:
+    import time
+
+    from naggy import notify
+    from naggy.config import load_config
+    from naggy.db import Database
+
+    cfg = load_config(config_path)
+    db = Database(cfg.database.path)
+    db.init_db()
+
+    try:
+        result = notify.run_pass(db, cfg, int(time.time()), dry_run=dry_run)
+    except notify.PushError as exc:
+        print(f"error: {exc}")
+        return 2
+
+    if not result["due"]:
+        print("nothing newly due")
+        return 0
+
+    if dry_run:
+        lead = "would notify"
+    elif result["notified"]:
+        lead = "notified"
+    else:
+        # Due, but nothing got through — say so plainly rather than implying a
+        # delivery. These stay un-stamped and are retried on the next pass.
+        lead = "not delivered, will retry"
+    print(f"{lead} — {len(result['due'])} due:")
+    for title in result["due"]:
+        print(f"  • {title}")
+    if not dry_run:
+        print(f"\nsent {result.get('sent', 0)}/{result.get('subscriptions', 0)} "
+              f"subscription(s), pruned {result.get('pruned', 0)}, "
+              f"failed {result.get('failed', 0)}")
+    return 0
+
+
+def _vapid_keys() -> int:
+    """Mint a keypair. Only the private key is stored — the public one is derived
+    from it at runtime, so there is nothing to keep in sync."""
+    from naggy import notify
+
+    try:
+        private = notify.generate_private_key()
+    except notify.PushError as exc:
+        print(f"error: {exc}")
+        return 2
+    print("Add this to the server's environment (never to config.toml):\n")
+    print(f"  NAGGY_VAPID_PRIVATE_KEY={private}\n")
+    print(f"Derived public key (served at /api/push/key): {notify.public_key_for(private)}")
+    return 0
 
 
 def _report(config_path: str, *, as_json: bool) -> int:

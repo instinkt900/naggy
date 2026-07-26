@@ -167,3 +167,20 @@ button.primary {
   cursor: pointer;
 }
 button.primary:active { filter: brightness(0.92); }
+
+/* Notifications toggle — secondary to the add form, so outlined rather than solid. */
+button.ghost {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 13px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+button.ghost:active { background: var(--surface-2); }
+button.ghost:disabled { color: var(--muted); cursor: default; }
+
+.notify-hint { margin: 8px 0 0; font-size: 0.8rem; color: var(--muted); }

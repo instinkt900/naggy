@@ -15,6 +15,9 @@ services:
     environment:
       # Reserved for the future Home Assistant feed; empty is fine today.
       NAGGY_HA_TOKEN: ${NAGGY_HA_TOKEN:-}
+      # Web Push signing key from docker/.env (gitignored). Generate one with
+      # `naggy vapid-keys`. Empty just means notifications stay off.
+      NAGGY_VAPID_PRIVATE_KEY: ${NAGGY_VAPID_PRIVATE_KEY:-}
     volumes:
       - ./config.toml:/app/config.toml:ro
       - naggy-data:/data

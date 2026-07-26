@@ -39,7 +39,43 @@ appear at the top; tap one to mark it done.
 naggy serve   -c config.toml            # run the web app (uvicorn)
 naggy init-db -c config.toml            # create schema and exit
 naggy report  -c config.toml [--json]   # print what's pending / upcoming
+naggy notify  -c config.toml [--dry-run] # push for anything newly due
+naggy vapid-keys                        # mint a Web Push signing key
 ```
+
+## Notifications
+
+Naggy can push a phone notification when a chore falls due, and it is **its own
+push server** — it holds a VAPID keypair and signs and encrypts every message
+itself. No third-party notification service, no account, no API key. The browser's
+push service (FCM on Android) only relays a blob it cannot read; that relay is part
+of the browser and can't be self-hosted, but nothing about your chores is visible
+to it.
+
+Setup:
+
+```bash
+naggy vapid-keys                        # prints NAGGY_VAPID_PRIVATE_KEY=...
+```
+
+Put that in the server's environment (`docker/.env` for the compose deployment),
+then set `enabled = true` and your `subject` under `[notify]` in `config.toml` and
+restart. On the phone, open the app and tap **Enable notifications**.
+
+Two requirements worth knowing up front:
+
+- **HTTPS is mandatory.** Browsers won't register a service worker — never mind
+  subscribe to push — over plain HTTP. Serve Naggy behind a reverse proxy with a
+  real certificate.
+- **On Android, install the PWA first** (Chrome ⋮ → *Add to Home screen*). Push to
+  a plain browser tab is unreliable and iOS refuses it outright.
+
+A running server checks for newly-due reminders every `[notify] poll_seconds` and
+pushes; set that to `0` to disable the poller and run `naggy notify` from cron
+instead. Either way each reminder is notified **once per due cycle** — completing a
+recurring chore re-arms it for the next one. `POST /api/push/test` sends a
+throwaway notification to every subscribed device, which is the quickest way to
+prove the chain works.
 
 ## Data model
 
@@ -59,6 +95,8 @@ only in the web layer. See `naggy/schedule.py` (pure, unit-tested) for the maths
 - Read APIs (the Home Assistant seam): `GET /api/reminders`, `GET /api/pending`
 - Write APIs: `POST /api/reminders`, `POST /api/reminders/{id}/complete`,
   `PATCH /api/reminders/{id}`, `DELETE /api/reminders/{id}`
+- Push: `GET /api/push/key`, `POST /api/push/subscribe`,
+  `POST /api/push/unsubscribe`, `POST /api/push/test`
 
 HTMX form posts get back the re-rendered board fragment; the same endpoints answer
 JSON when the request isn't from HTMX.
@@ -77,9 +115,11 @@ Code is baked into the image, so a code/template/static change needs a rebuild.
 
 ## Roadmap (designed for, not yet built)
 
-- **Per-task notifications** — an opt-in notification channel per reminder, added
-  via a guarded `ALTER TABLE` migration in `db.init_db()` plus a `naggy notify`
-  command reusing `schedule.board()`.
+- **Per-reminder notification opt-out** — notifications are currently all-or-nothing
+  per device. A `notify` flag per reminder would slot in as a guarded `ALTER TABLE`
+  in `db.init_db()` plus a filter in `schedule.due_for_notification`.
+- **Quiet hours** — suppress pushes overnight; a pure predicate in `schedule.py`
+  taking the local hour, so it stays testable.
 - **Home Assistant feed** — surface pending tasks on an HA dashboard by polling the
   existing `GET /api/pending` JSON (or a future `naggy check` that POSTs to HA).
 

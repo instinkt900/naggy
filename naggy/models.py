@@ -21,6 +21,7 @@ class Reminder:
     last_done_at: int | None = None     # epoch s of the last completion, if any
     created_at: int = 0
     active: bool = True                 # one-shots go inactive once addressed
+    notified_at: int | None = None      # epoch s of the last push sent for this cycle
     id: int | None = None
 
     def is_pending(self, now: int) -> bool:
@@ -29,6 +30,30 @@ class Reminder:
 
     def status_at(self, now: int) -> str:
         return "pending" if self.is_pending(now) else "upcoming"
+
+
+@dataclass
+class PushSubscription:
+    """A browser's Web Push subscription, as handed to us by `pushManager.subscribe()`.
+
+    `endpoint` is the browser's stable identity for the subscription (and the push
+    service URL we POST to), so it — not the row id — is the natural unique key.
+    The two `keys` are what the payload gets encrypted to; without them the push
+    service could only deliver an empty wake-up.
+    """
+
+    endpoint: str
+    p256dh: str
+    auth: str
+    label: str = ""                     # free-text device hint, so rows are tellable apart
+    created_at: int = 0
+    last_ok_at: int | None = None
+    failures: int = 0                   # consecutive transient delivery failures
+    id: int | None = None
+
+    def to_info(self) -> dict:
+        """Reshape into the subscription_info dict pywebpush expects."""
+        return {"endpoint": self.endpoint, "keys": {"p256dh": self.p256dh, "auth": self.auth}}
 
 
 @dataclass

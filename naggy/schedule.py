@@ -72,3 +72,23 @@ def board(reminders: list[Reminder], now: int) -> dict[str, list[Reminder]]:
     pending.sort(key=lambda r: r.due_at)          # most overdue (smallest due_at) first
     upcoming.sort(key=lambda r: r.due_at)          # soonest first
     return {"pending": pending, "upcoming": upcoming}
+
+
+def due_for_notification(reminders: list[Reminder], now: int) -> list[Reminder]:
+    """Pending reminders that haven't been pushed about for their current cycle.
+
+    `notified_at` records when we last sent a notification. A reminder is worth
+    nagging about when that stamp is older than the due moment it belongs to —
+    which makes "notify at most once per cycle" fall out of the arithmetic rather
+    than needing its own bookkeeping: addressing a recurring reminder moves
+    `due_at` forward past the old stamp and re-arms it, while an ignored reminder
+    keeps a stamp newer than its (unchanged) `due_at` and stays quiet.
+
+    Same ordering as `board`: most overdue first.
+    """
+    out = [
+        r for r in reminders
+        if r.is_pending(now) and (r.notified_at is None or r.notified_at < r.due_at)
+    ]
+    out.sort(key=lambda r: r.due_at)
+    return out

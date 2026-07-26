@@ -15,7 +15,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from naggy import schedule
-from naggy.models import Completion, Reminder
+from naggy.models import Completion, PushSubscription, Reminder
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS reminders (
@@ -28,9 +28,21 @@ CREATE TABLE IF NOT EXISTS reminders (
     due_at        INTEGER NOT NULL,                         -- epoch s; pending when now>=due_at
     last_done_at  INTEGER,                                  -- epoch s; NULL until first done
     created_at    INTEGER NOT NULL,
-    active        INTEGER NOT NULL DEFAULT 1
+    active        INTEGER NOT NULL DEFAULT 1,
+    notified_at   INTEGER                                  -- epoch s of last push for this cycle
 );
 CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(active, due_at);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint   TEXT    NOT NULL UNIQUE,                    -- the browser's own identity for it
+    p256dh     TEXT    NOT NULL,                           -- payload encryption key
+    auth       TEXT    NOT NULL,                           -- payload auth secret
+    label      TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    last_ok_at INTEGER,
+    failures   INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS completions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,9 +75,15 @@ class Database:
             parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(_SCHEMA)
-            # Future notify/HA columns land here via guarded ALTER TABLE, e.g.:
-            #   if not self._has_column(conn, "reminders", "notify_channel"):
-            #       conn.execute("ALTER TABLE reminders ADD COLUMN notify_channel TEXT")
+            # Additive migrations for databases created before a column existed.
+            # `_SCHEMA` carries the same columns so fresh installs skip all of this.
+            if not self._has_column(conn, "reminders", "notified_at"):
+                conn.execute("ALTER TABLE reminders ADD COLUMN notified_at INTEGER")
+
+    @staticmethod
+    def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        return any(row["name"] == column for row in rows)
 
     # --- reads ---------------------------------------------------------------
 
@@ -82,6 +100,13 @@ class Database:
                 "SELECT * FROM reminders WHERE id = ?", (reminder_id,)
             ).fetchone()
         return _reminder(row) if row else None
+
+    def list_subscriptions(self) -> list[PushSubscription]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM push_subscriptions ORDER BY created_at"
+            ).fetchall()
+        return [_subscription(r) for r in rows]
 
     def recent_completions(self, limit: int = 50) -> list[Completion]:
         with self.connect() as conn:
@@ -157,6 +182,62 @@ class Database:
             cur = conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
             return cur.rowcount > 0
 
+    def mark_notified(self, reminder_id: int, now: int) -> None:
+        """Stamp that we've pushed about this reminder's current due cycle."""
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE reminders SET notified_at = ? WHERE id = ?", (now, reminder_id)
+            )
+
+    # --- push subscriptions ----------------------------------------------------
+
+    def add_subscription(
+        self, endpoint: str, p256dh: str, auth: str, label: str, now: int
+    ) -> int:
+        """Store a browser subscription, upserting on `endpoint`.
+
+        Browsers re-hand us the same endpoint on every page load (and rotate the
+        keys when they refresh a subscription), so this has to be an upsert or the
+        table would grow a duplicate row per visit. A re-subscribe also clears the
+        failure count: whatever was wrong before, the browser says it's live now.
+        """
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO push_subscriptions (endpoint, p256dh, auth, label, created_at)
+                     VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(endpoint) DO UPDATE SET
+                     p256dh = excluded.p256dh,
+                     auth   = excluded.auth,
+                     label  = excluded.label,
+                     failures = 0""",
+                (endpoint, p256dh, auth, label, now),
+            )
+            row = conn.execute(
+                "SELECT id FROM push_subscriptions WHERE endpoint = ?", (endpoint,)
+            ).fetchone()
+            return int(row["id"])
+
+    def delete_subscription(self, endpoint: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,)
+            )
+            return cur.rowcount > 0
+
+    def mark_subscription_ok(self, sub_id: int, now: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE push_subscriptions SET last_ok_at = ?, failures = 0 WHERE id = ?",
+                (now, sub_id),
+            )
+
+    def mark_subscription_failed(self, sub_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE push_subscriptions SET failures = failures + 1 WHERE id = ?",
+                (sub_id,),
+            )
+
 
 def _reminder(row: sqlite3.Row) -> Reminder:
     return Reminder(
@@ -169,6 +250,20 @@ def _reminder(row: sqlite3.Row) -> Reminder:
         last_done_at=row["last_done_at"],
         created_at=row["created_at"],
         active=bool(row["active"]),
+        notified_at=row["notified_at"],
+        id=row["id"],
+    )
+
+
+def _subscription(row: sqlite3.Row) -> PushSubscription:
+    return PushSubscription(
+        endpoint=row["endpoint"],
+        p256dh=row["p256dh"],
+        auth=row["auth"],
+        label=row["label"],
+        created_at=row["created_at"],
+        last_ok_at=row["last_ok_at"],
+        failures=row["failures"],
         id=row["id"],
     )
 

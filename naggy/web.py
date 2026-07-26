@@ -14,7 +14,10 @@ are the stable JSON seam a future Home Assistant dashboard would poll.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -24,13 +27,15 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from naggy import __version__, schedule
+from naggy import __version__, notify, schedule
 from naggy.config import load_config
 from naggy.constants import INTERVAL_UNITS, KINDS, humanize_delta
 from naggy.db import Database
 from naggy.models import Reminder
 
 _HERE = Path(__file__).parent
+
+log = logging.getLogger(__name__)
 
 
 def create_app(config_path: str) -> FastAPI:
@@ -39,8 +44,46 @@ def create_app(config_path: str) -> FastAPI:
     db.init_db()
     tz = ZoneInfo(cfg.web.timezone)
 
+    # Derived once at startup: "" means push is off or misconfigured, which the UI
+    # reads as "notifications unavailable" rather than an error.
+    vapid_public_key = notify.public_key(cfg)
+    if cfg.notify.enabled and not vapid_public_key:
+        log.warning("[notify] is enabled but no usable VAPID key — push is disabled")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        """Run the notify pass on a timer inside the server process.
+
+        The Docker deployment has no cron, so polling here is what makes push work
+        out of the box; setting `poll_seconds = 0` disables it for anyone who'd
+        rather drive `naggy notify` externally. The pass does blocking network I/O,
+        hence `to_thread` — it must not stall the event loop serving the board.
+        """
+        task = None
+        if vapid_public_key and cfg.notify.poll_seconds > 0:
+            task = asyncio.create_task(_poll_loop())
+        try:
+            yield
+        finally:
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    async def _poll_loop() -> None:
+        while True:
+            await asyncio.sleep(cfg.notify.poll_seconds)
+            try:
+                result = await asyncio.to_thread(notify.run_pass, db, cfg, now_epoch())
+                if result["sent"]:
+                    log.info("notify pass: %s", result)
+            except Exception:  # a bad pass must never kill the loop
+                log.exception("notify pass failed")
+
     templates = Jinja2Templates(directory=str(_HERE / "templates"))
-    app = FastAPI(title="Naggy", version=__version__)
+    app = FastAPI(title="Naggy", version=__version__, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 
     # --- helpers (closures over cfg/db/tz) ----------------------------------
@@ -191,6 +234,58 @@ def create_app(config_path: str) -> FastAPI:
         if wants_partial(request):
             return board_partial(request)
         return reminder_json(r, now)
+
+    # --- push subscriptions ---------------------------------------------------
+
+    @app.get("/api/push/key")
+    def push_key():
+        """The application server key the browser needs to subscribe.
+
+        503 (rather than an error page) is the UI's signal to show the toggle as
+        unavailable — it distinguishes "push isn't set up on this server" from
+        "this browser can't do push".
+        """
+        if not vapid_public_key:
+            return JSONResponse({"error": "push not configured"}, status_code=503)
+        return {"key": vapid_public_key}
+
+    @app.post("/api/push/subscribe")
+    async def push_subscribe(request: Request):
+        body = await request.json()
+        endpoint = (body.get("endpoint") or "").strip()
+        keys = body.get("keys") or {}
+        p256dh = (keys.get("p256dh") or "").strip()
+        auth = (keys.get("auth") or "").strip()
+        if not endpoint or not p256dh or not auth:
+            return JSONResponse({"error": "malformed subscription"}, status_code=400)
+        sub_id = db.add_subscription(
+            endpoint, p256dh, auth, (body.get("label") or "").strip()[:80], now_epoch()
+        )
+        return {"ok": True, "id": sub_id}
+
+    @app.post("/api/push/unsubscribe")
+    async def push_unsubscribe(request: Request):
+        body = await request.json()
+        ok = db.delete_subscription((body.get("endpoint") or "").strip())
+        return JSONResponse({"ok": ok}, status_code=200 if ok else 404)
+
+    @app.post("/api/push/test")
+    async def push_test():
+        """Send a throwaway notification — the only way to prove the whole chain
+        (VAPID signing, push service, service worker) works without waiting for a
+        chore to fall due."""
+        if not vapid_public_key:
+            return JSONResponse({"error": "push not configured"}, status_code=503)
+        payload = {
+            "title": "Naggy",
+            "body": "Test notification — push is working.",
+            "url": "/",
+            "tag": "naggy-test",
+        }
+        result = await asyncio.to_thread(
+            notify.send_to_all, db, cfg, payload, now_epoch()
+        )
+        return result
 
     @app.patch("/api/reminders/{reminder_id}")
     async def patch_reminder(request: Request, reminder_id: int):

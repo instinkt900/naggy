@@ -11,5 +11,27 @@ port = 8080
 # IANA timezone used for display and for calendar-based (month/year) intervals.
 timezone = "UTC"
 
-# There are no secrets today. A future Home Assistant token would come from the
-# environment only (NAGGY_HA_TOKEN), never from this file.
+[notify]
+# Web Push notifications. Naggy signs and encrypts these itself — no third-party
+# notification service is involved — but it needs a VAPID key to do so:
+#
+#   naggy vapid-keys
+#
+# and put the printed NAGGY_VAPID_PRIVATE_KEY in the environment (docker/.env for
+# the compose deployment). With no key, push simply stays off and the toggle in
+# the UI reports itself unavailable.
+#
+# Requires HTTPS: browsers won't register a service worker, let alone subscribe to
+# push, over plain HTTP.
+enabled = false
+# Contact address push services can reach you at. "mailto:" or "https:".
+subject = "mailto:you@example.com"
+# How often the running server checks for newly-due reminders and pushes.
+# Set to 0 to disable the in-process poller and drive `naggy notify` from cron.
+poll_seconds = 300
+# How long a push service should hold a message for a phone that's offline.
+ttl_seconds = 86400
+
+# Secrets never live in this file. The VAPID signing key comes from
+# NAGGY_VAPID_PRIVATE_KEY, and a future Home Assistant token from NAGGY_HA_TOKEN —
+# environment only. Putting either here is a startup error.

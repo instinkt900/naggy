@@ -26,12 +26,13 @@ reuse its idioms.
 
 ```
 naggy/
-  cli.py         entrypoint: serve | init-db | report
+  cli.py         entrypoint: serve | init-db | report | notify | vapid-keys
   __main__.py    `python -m naggy`
   web.py         FastAPI app factory (create_app); all routes as closures; tz helpers
   db.py          SQLite schema + Database wrapper (short-lived connections)
-  models.py      dataclasses: Reminder, Completion
-  schedule.py    PURE maths: next_due (interval arithmetic), board (pending/upcoming split)
+  models.py      dataclasses: Reminder, Completion, PushSubscription
+  schedule.py    PURE maths: next_due, board, due_for_notification
+  notify.py      Web Push: VAPID keys, pywebpush sending, the notify pass
   config.py      TOML loader; dataclasses; _known() rejects unknown keys; secrets from env only
   constants.py   KINDS, INTERVAL_UNITS, humanize_delta
   templates/     base.html, phone/index.html, partials/board.html
@@ -60,6 +61,8 @@ config.example.toml   the only tracked config; real config.toml is gitignored
 - Read APIs (the **Home Assistant seam**): `GET /api/reminders`, `GET /api/pending`
 - Write APIs: `POST /api/reminders`, `POST /api/reminders/{id}/complete`,
   `PATCH /api/reminders/{id}`, `DELETE /api/reminders/{id}`
+- Push: `GET /api/push/key`, `POST /api/push/subscribe`,
+  `POST /api/push/unsubscribe`, `POST /api/push/test`
 - HTMX form posts return the re-rendered `partials/board.html` fragment (swap
   target `#board`); the same endpoints answer JSON when `HX-Request` is absent.
 - `sw.js` is **network-first**, so code/template/static changes roll out on reload.
@@ -70,14 +73,19 @@ config.example.toml   the only tracked config; real config.toml is gitignored
 naggy serve   -c config.toml
 naggy init-db -c config.toml
 naggy report  -c config.toml [--json]
+naggy notify  -c config.toml [--dry-run]
+naggy vapid-keys
 ```
 
 ## Configuration
 
 One TOML (`config.toml`; template `config.example.toml`). Sections `[database]`
-(path) and `[web]` (host/port/timezone). `config.py` uses dataclasses + `_known()`
-so an **unknown key/section fails loudly**. No secrets today; a future
-`NAGGY_HA_TOKEN` would come from **env only**, never the TOML.
+(path), `[web]` (host/port/timezone) and `[notify]`
+(enabled/subject/poll_seconds/ttl_seconds). `config.py` uses dataclasses +
+`_known()` so an **unknown key/section fails loudly**. Secrets come from **env
+only**, never the TOML: `NAGGY_VAPID_PRIVATE_KEY` today, `NAGGY_HA_TOKEN` in
+future — since they aren't fields of any section, `_known()` rejects them
+automatically if someone pastes one into the file.
 
 ## Deployment
 
@@ -89,11 +97,35 @@ are `naggy`; container listens on **8080 internally**, host port
 Deploy: `git pull --ff-only && cd docker && docker compose up -d --build`
 (wrapped by `deploy/install-server.sh`). Verify: `curl :<port>/healthz`.
 
+## Notifications (Web Push)
+
+Naggy is its **own push application server**: `notify.py` holds a VAPID keypair and
+signs/encrypts each message, so no third-party notification service is involved
+(the browser's push service only relays an opaque, E2E-encrypted blob). Needs
+**HTTPS** and, on Android, the PWA to be **installed**.
+
+- Private key from `NAGGY_VAPID_PRIVATE_KEY` **only**; the public key is *derived*
+  from it at startup, never configured, so the two can't drift. `naggy vapid-keys`
+  mints one.
+- `reminders.notified_at` stamps the last push for the **current due cycle**. The
+  once-per-cycle rule falls out of `notified_at < due_at` arithmetic — see
+  `schedule.due_for_notification` (pure, tested in `tests/test_notify.py`).
+- Only stamp `notified_at` when a delivery actually succeeded, so a failed pass
+  retries rather than silently swallowing the nag.
+- 404/410 from a push service means the subscription is permanently dead → prune
+  the row. Anything else is transient → bump `failures` and retry.
+- Delivery runs either from the in-process poller (`[notify] poll_seconds`, the
+  default since the container has no cron) or from `naggy notify` externally.
+  Both call `notify.run_pass`.
+- `pywebpush`/`cryptography` imports are **lazy** so the plain-assert tests and the
+  rest of the CLI work without them installed.
+
 ## Goals / roadmap (designed for, not yet built)
 
-- **Per-task notifications**: opt-in channel per reminder — add `notify_*` columns
-  via a guarded `ALTER TABLE` in `db.init_db()`, plus a `naggy notify` command
-  reusing `schedule.board()`. Keep it a clean seam.
+- **Per-reminder notification opt-out**: notifications are all-or-nothing per
+  device today. A `notify` flag per reminder would be a guarded `ALTER TABLE` plus
+  a filter in `schedule.due_for_notification`.
+- **Quiet hours**: suppress overnight pushes via a pure predicate in `schedule.py`.
 - **Home Assistant feed**: an HA dashboard consuming `GET /api/pending`, or a future
   `naggy check` that POSTs to HA. The JSON read endpoints already exist for this.
 
