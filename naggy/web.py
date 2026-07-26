@@ -76,7 +76,9 @@ def create_app(config_path: str) -> FastAPI:
         while True:
             await asyncio.sleep(cfg.notify.poll_seconds)
             try:
-                result = await asyncio.to_thread(notify.run_pass, db, cfg, now_epoch())
+                result = await asyncio.to_thread(
+                    notify.run_pass, db, cfg, now_epoch(), tz
+                )
                 if result["sent"]:
                     log.info("notify pass: %s", result)
             except Exception:  # a bad pass must never kill the loop

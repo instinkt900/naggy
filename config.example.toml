@@ -26,11 +26,27 @@ timezone = "UTC"
 enabled = false
 # Contact address push services can reach you at. "mailto:" or "https:".
 subject = "mailto:you@example.com"
-# How often the running server checks for newly-due reminders and pushes.
-# Set to 0 to disable the in-process poller and drive `naggy notify` from cron.
+# How often the running server checks for newly-due reminders and pushes. Also
+# the repost cadence when repeat_while_pending is on. Set to 0 to disable the
+# in-process poller and drive `naggy notify` from cron.
 poll_seconds = 300
 # How long a push service should hold a message for a phone that's offline.
 ttl_seconds = 86400
+
+# Local time of day to hold notifications until, "HH:MM", or "" to push the
+# moment a chore falls due. Worth setting: a reminder's due time is whatever time
+# of day you last marked it done, so without this the nags drift to odd hours.
+notify_at = "08:00"
+# Never buzz or ring — notifications just appear in the shade.
+silent = false
+# Re-push an outstanding chore every pass, so swiping the notification away only
+# clears it until the next one. Reposts are always silent and never re-alert;
+# only the first notification of a cycle gets your attention. This is as close as
+# the web gets to Android's non-dismissible "ongoing" notifications.
+repeat_while_pending = false
+# Show the pending count on the home-screen app icon (Badging API). Unlike a
+# notification this genuinely can't be swiped away — it clears when the board does.
+badge = true
 
 # Secrets never live in this file. The VAPID signing key comes from
 # NAGGY_VAPID_PRIVATE_KEY, and a future Home Assistant token from NAGGY_HA_TOKEN —

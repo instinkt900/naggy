@@ -1,4 +1,5 @@
-<div id="board" class="board">
+{# data-pending drives the home-screen icon badge; see syncBadge in phone.js. #}
+<div id="board" class="board" data-pending="{{ board.pending|length }}">
   <section class="pending">
     <h2>Pending actions {% if board.pending %}<span class="count">{{ board.pending|length }}</span>{% endif %}</h2>
     {% if board.pending %}

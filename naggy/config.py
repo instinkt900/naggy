@@ -11,6 +11,7 @@ placed in the TOML — they aren't fields of any section, so `_known()` catches 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,6 +23,9 @@ except ModuleNotFoundError:  # pragma: no cover
 
 class ConfigError(RuntimeError):
     """Raised for any malformed or disallowed configuration."""
+
+
+_HHMM = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 
 
 @dataclass
@@ -48,6 +52,24 @@ class NotifyConfig:
     poll_seconds: int = 300
     # How long the push service should hold a message for a phone that's offline.
     ttl_seconds: int = 86_400
+    # Local "HH:MM" to hold notifications until, or "" to push the moment a chore
+    # falls due (which is whatever time of day it was last addressed).
+    notify_at: str = ""
+    # Never buzz or ring — the notification just appears in the shade.
+    silent: bool = False
+    # Re-push an outstanding chore on every pass, so swiping the notification away
+    # only gets rid of it until the next one. The repost is always silent; only
+    # the first notification of a cycle alerts. Cadence is `poll_seconds`.
+    repeat_while_pending: bool = False
+    # Show the pending count on the home-screen app icon (Badging API).
+    badge: bool = True
+
+    def notify_at_hm(self) -> tuple[int, int] | None:
+        """`notify_at` as (hour, minute), or None when unset. Validated at load."""
+        if not self.notify_at:
+            return None
+        hour, minute = self.notify_at.split(":")
+        return int(hour), int(minute)
 
 
 @dataclass
@@ -102,5 +124,9 @@ def load_config(path: str | Path) -> Config:
             )
         if notify.poll_seconds < 0:
             raise ConfigError("[notify] poll_seconds must be >= 0")
+        if notify.notify_at and not _HHMM.fullmatch(notify.notify_at):
+            raise ConfigError(
+                f'[notify] notify_at must be 24-hour "HH:MM" (got {notify.notify_at!r})'
+            )
 
     return cfg

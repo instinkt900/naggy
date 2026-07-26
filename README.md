@@ -77,6 +77,31 @@ recurring chore re-arms it for the next one. `POST /api/push/test` sends a
 throwaway notification to every subscribed device, which is the quickest way to
 prove the chain works.
 
+### When a nag actually fires
+
+A reminder becomes due at its own anniversary — `due_at` is simply
+`last done + interval`, so the **time of day is whatever time you last marked it
+done** (or created it). Left alone, that drifts: tick a chore off at 22:40 once and
+it will nag at 22:40 from then on.
+
+Set `notify_at = "08:00"` to decouple the two. The reminder still falls due when it
+falls due (and shows as pending in the app immediately), but the push is held until
+the next 08:00 local. The hour is held on the wall clock, so it survives DST.
+
+### Making a nag hard to ignore
+
+The web platform can't produce a non-dismissible notification — Android's "ongoing"
+flag isn't exposed to web apps. Two settings get close:
+
+- `repeat_while_pending = true` re-pushes anything still outstanding on every pass.
+  Because every nag shares one notification tag, swiping it away just means it
+  reappears within `poll_seconds` instead of stacking up. Reposts are always silent
+  and never re-alert — only the first notification of a cycle buzzes.
+- `badge = true` puts the pending count on the home-screen app icon via the Badging
+  API. That one genuinely can't be swiped away; it clears when the board does. The
+  page keeps it in step on every board swap, so completing the last chore clears it
+  at once rather than at the next push.
+
 ## Data model
 
 Every reminder has a canonical `due_at` (UTC epoch seconds) — the moment it becomes
@@ -118,8 +143,6 @@ Code is baked into the image, so a code/template/static change needs a rebuild.
 - **Per-reminder notification opt-out** — notifications are currently all-or-nothing
   per device. A `notify` flag per reminder would slot in as a guarded `ALTER TABLE`
   in `db.init_db()` plus a filter in `schedule.due_for_notification`.
-- **Quiet hours** — suppress pushes overnight; a pure predicate in `schedule.py`
-  taking the local hour, so it stays testable.
 - **Home Assistant feed** — surface pending tasks on an HA dashboard by polling the
   existing `GET /api/pending` JSON (or a future `naggy check` that POSTs to HA).
 

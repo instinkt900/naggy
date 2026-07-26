@@ -29,6 +29,8 @@ from naggy import schedule
 from naggy.constants import humanize_delta
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps imports lazy at runtime
+    from zoneinfo import ZoneInfo
+
     from naggy.config import Config
     from naggy.db import Database
 
@@ -170,13 +172,25 @@ def send_to_all(db: Database, cfg: Config, payload: dict, now: int) -> dict:
 # --- the notify pass ---------------------------------------------------------
 
 
-def build_payload(reminders: list, now: int) -> dict:
+def build_payload(
+    reminders: list,
+    now: int,
+    *,
+    silent: bool = False,
+    repost: bool = False,
+    badge_count: int | None = None,
+) -> dict:
     """Collapse the newly-pending reminders into one notification.
 
     One grouped notification per pass, not one per chore: a nagging app that fires
     five separate buzzes the moment a batch falls due gets its permission revoked.
     The `tag` makes a later pass replace the previous notification rather than
     stack on top of it.
+
+    A `repost` — the same outstanding chores pushed again under
+    `repeat_while_pending` — is always silent and never re-alerts. The first
+    notification of a cycle gets your attention; after that it should just sit
+    there, reappearing if you swipe it away rather than buzzing again.
     """
     if len(reminders) == 1:
         r = reminders[0]
@@ -192,11 +206,16 @@ def build_payload(reminders: list, now: int) -> dict:
         "body": body[:_MAX_BODY_CHARS],
         "url": "/",
         "tag": "naggy-pending",
+        "silent": bool(silent or repost),
+        "renotify": not repost,
+        "badge_count": len(reminders) if badge_count is None else badge_count,
     }
 
 
-def run_pass(db: Database, cfg: Config, now: int, *, dry_run: bool = False) -> dict:
-    """Notify once for every reminder that has newly fallen due.
+def run_pass(
+    db: Database, cfg: Config, now: int, tz: ZoneInfo, *, dry_run: bool = False
+) -> dict:
+    """Notify for every reminder that should be pushed about right now.
 
     Reminders are stamped with `notified_at` only when a delivery actually
     succeeded. If every send failed (server offline, push service hiccup) the
@@ -204,20 +223,41 @@ def run_pass(db: Database, cfg: Config, now: int, *, dry_run: bool = False) -> d
     the nag. With no subscriptions at all we do nothing and stamp nothing, so a
     device that subscribes later still hears about what is outstanding.
     """
-    due = schedule.due_for_notification(db.list_active(), now)
+    active = db.list_active()
+    due = schedule.due_for_notification(
+        active, now,
+        tz=tz,
+        notify_at=cfg.notify.notify_at_hm(),
+        repeat=cfg.notify.repeat_while_pending,
+    )
     result = {"due": [r.title for r in due], "sent": 0, "notified": 0}
     if not due:
         return result
 
+    # A pass where nothing is newly due is a repost of chores the user has already
+    # been told about — it should slip in quietly rather than buzz again.
+    repost = all(
+        r.notified_at is not None and r.notified_at >= r.due_at for r in due
+    )
+    payload = build_payload(
+        due, now,
+        silent=cfg.notify.silent,
+        repost=repost,
+        # Badge the true pending total, which under the default once-per-cycle
+        # rule is more than the handful being pushed about in this pass.
+        badge_count=len(schedule.board(active, now)["pending"]),
+    )
+    result["repost"] = repost
+
     if dry_run:
-        result["payload"] = build_payload(due, now)
+        result["payload"] = payload
         return result
 
     if not db.list_subscriptions():
         log.info("%d reminder(s) due but no push subscriptions registered", len(due))
         return result
 
-    outcome = send_to_all(db, cfg, build_payload(due, now), now)
+    outcome = send_to_all(db, cfg, payload, now)
     result.update(outcome)
     if outcome["sent"]:
         for r in due:

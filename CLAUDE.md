@@ -31,7 +31,7 @@ naggy/
   web.py         FastAPI app factory (create_app); all routes as closures; tz helpers
   db.py          SQLite schema + Database wrapper (short-lived connections)
   models.py      dataclasses: Reminder, Completion, PushSubscription
-  schedule.py    PURE maths: next_due, board, due_for_notification
+  schedule.py    PURE maths: next_due, board, due_for_notification, notify_time
   notify.py      Web Push: VAPID keys, pywebpush sending, the notify pass
   config.py      TOML loader; dataclasses; _known() rejects unknown keys; secrets from env only
   constants.py   KINDS, INTERVAL_UNITS, humanize_delta
@@ -110,6 +110,15 @@ signs/encrypts each message, so no third-party notification service is involved
 - `reminders.notified_at` stamps the last push for the **current due cycle**. The
   once-per-cycle rule falls out of `notified_at < due_at` arithmetic — see
   `schedule.due_for_notification` (pure, tested in `tests/test_notify.py`).
+- `notify_at = "HH:MM"` holds a push until that local time via
+  `schedule.notify_time`, without touching `due_at` — a reminder's due time-of-day
+  is just whenever it was last addressed, so it drifts and shouldn't drive nags.
+- `repeat_while_pending` drops the once-per-cycle rule so a swiped-away
+  notification comes back. Reposts are forced `silent` with `renotify: false`;
+  only the first notification of a cycle alerts. **Non-dismissible notifications
+  are impossible on the web** — Android's ongoing flag isn't exposed — so the
+  Badging API (`setAppBadge`, driven by `data-pending` on the board partial and by
+  `badge_count` in the push payload) is the real persistent signal.
 - Only stamp `notified_at` when a delivery actually succeeded, so a failed pass
   retries rather than silently swallowing the nag.
 - 404/410 from a push service means the subscription is permanently dead → prune
@@ -125,7 +134,6 @@ signs/encrypts each message, so no third-party notification service is involved
 - **Per-reminder notification opt-out**: notifications are all-or-nothing per
   device today. A `notify` flag per reminder would be a guarded `ALTER TABLE` plus
   a filter in `schedule.due_for_notification`.
-- **Quiet hours**: suppress overnight pushes via a pure predicate in `schedule.py`.
 - **Home Assistant feed**: an HA dashboard consuming `GET /api/pending`, or a future
   `naggy check` that POSTs to HA. The JSON read endpoints already exist for this.
 

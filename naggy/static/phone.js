@@ -17,6 +17,18 @@
     if (e.target && e.target.name === "kind") syncLead();
   });
 
+  // --- home-screen icon badge -------------------------------------------------
+
+  // Kept in step with the board on every swap, so clearing the last pending chore
+  // clears the badge immediately rather than waiting for the next push.
+  function syncBadge() {
+    const board = document.getElementById("board");
+    if (!board || !navigator.setAppBadge) return;
+    const n = parseInt(board.dataset.pending || "0", 10) || 0;
+    const p = n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge();
+    if (p && p.catch) p.catch(() => {});
+  }
+
   // --- push notifications ---------------------------------------------------
 
   // The applicationServerKey has to be raw bytes, but the server sends the key as
@@ -118,8 +130,10 @@
     });
   }
 
-  // Run once on load, and again after any HTMX swap re-renders the form.
+  // Run once on load, and again after any HTMX swap re-renders the board/form.
   window.addEventListener("load", syncLead);
+  window.addEventListener("load", syncBadge);
   window.addEventListener("load", initPush);
   document.body.addEventListener("htmx:afterSwap", syncLead);
+  document.body.addEventListener("htmx:afterSwap", syncBadge);
 })();

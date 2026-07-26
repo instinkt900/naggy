@@ -74,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _notify(config_path: str, *, dry_run: bool) -> int:
     import time
+    from zoneinfo import ZoneInfo
 
     from naggy import notify
     from naggy.config import load_config
@@ -82,9 +83,10 @@ def _notify(config_path: str, *, dry_run: bool) -> int:
     cfg = load_config(config_path)
     db = Database(cfg.database.path)
     db.init_db()
+    tz = ZoneInfo(cfg.web.timezone)
 
     try:
-        result = notify.run_pass(db, cfg, int(time.time()), dry_run=dry_run)
+        result = notify.run_pass(db, cfg, int(time.time()), tz, dry_run=dry_run)
     except notify.PushError as exc:
         print(f"error: {exc}")
         return 2

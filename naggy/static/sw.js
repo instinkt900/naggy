@@ -56,17 +56,33 @@ self.addEventListener("push", (e) => {
   } catch (_) {
     d = {};
   }
+  // The home-screen icon badge is the part that can't be swiped away, so it is
+  // the honest "something is still outstanding" signal. Web notifications can't
+  // be made non-dismissible; Android's ongoing flag isn't exposed to us.
+  if (typeof d.badge_count === "number") setBadge(d.badge_count);
+
   e.waitUntil(
     self.registration.showNotification(d.title || "Naggy", {
       body: d.body || "Something needs doing.",
       icon: "/static/icons/icon-192.png",
       badge: "/static/icons/icon-192.png",
-      tag: d.tag || "naggy",       // replaces the previous nag instead of stacking
-      renotify: true,              // ...but still buzzes when it does
+      tag: d.tag || "naggy",         // replaces the previous nag instead of stacking
+      renotify: d.renotify !== false, // reposts replace quietly; only the first alerts
+      silent: d.silent === true,
       data: { url: d.url || "/" },
     })
   );
 });
+
+function setBadge(count) {
+  // Not universally implemented, and it throws rather than no-ops where it isn't.
+  try {
+    if (count > 0) self.navigator.setAppBadge(count);
+    else self.navigator.clearAppBadge();
+  } catch (_) {
+    /* no badging support here */
+  }
+}
 
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();

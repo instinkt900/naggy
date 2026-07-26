@@ -74,21 +74,63 @@ def board(reminders: list[Reminder], now: int) -> dict[str, list[Reminder]]:
     return {"pending": pending, "upcoming": upcoming}
 
 
-def due_for_notification(reminders: list[Reminder], now: int) -> list[Reminder]:
-    """Pending reminders that haven't been pushed about for their current cycle.
+def notify_time(due_at: int, tz: ZoneInfo, hour: int, minute: int) -> int:
+    """First moment at or after `due_at` whose local clock reads `hour:minute`.
 
-    `notified_at` records when we last sent a notification. A reminder is worth
-    nagging about when that stamp is older than the due moment it belongs to —
-    which makes "notify at most once per cycle" fall out of the arithmetic rather
-    than needing its own bookkeeping: addressing a recurring reminder moves
+    Lets the nag land at a civilised hour without disturbing the schedule: a
+    reminder still *becomes due* at its own anniversary (which is whatever time of
+    day it was last addressed), we just hold the notification until the next
+    hour:minute. A chore falling due at 13:50 with a 08:00 notify time is pushed
+    the following morning, not eighteen hours early.
+
+    Arithmetic is on the local wall clock, so the hour stays put across a DST
+    change rather than sliding by an hour.
+    """
+    local = datetime.fromtimestamp(due_at, tz)
+    candidate = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate < local:
+        candidate += timedelta(days=1)
+    return int(candidate.timestamp())
+
+
+def due_for_notification(
+    reminders: list[Reminder],
+    now: int,
+    *,
+    tz: ZoneInfo | None = None,
+    notify_at: tuple[int, int] | None = None,
+    repeat: bool = False,
+) -> list[Reminder]:
+    """Pending reminders that should be pushed about right now.
+
+    `notified_at` records when we last sent a notification. By default a reminder
+    is worth nagging about when that stamp is older than the due moment it belongs
+    to — which makes "notify at most once per cycle" fall out of the arithmetic
+    rather than needing its own bookkeeping: addressing a recurring reminder moves
     `due_at` forward past the old stamp and re-arms it, while an ignored reminder
     keeps a stamp newer than its (unchanged) `due_at` and stays quiet.
 
+    `repeat` drops that once-per-cycle rule so an outstanding chore is re-pushed on
+    every pass. Paired with a stable notification tag, that makes a notification
+    the user swipes away come back — the closest the web platform gets to
+    Android's "ongoing" notifications, which it cannot set.
+
+    `notify_at` (an (hour, minute) pair, needing `tz`) holds each push until that
+    local time via `notify_time`.
+
     Same ordering as `board`: most overdue first.
     """
-    out = [
-        r for r in reminders
-        if r.is_pending(now) and (r.notified_at is None or r.notified_at < r.due_at)
-    ]
+    out = []
+    for r in reminders:
+        if not r.is_pending(now):
+            continue
+        gate = r.due_at
+        if notify_at is not None and tz is not None:
+            gate = notify_time(r.due_at, tz, *notify_at)
+        if now < gate:
+            continue
+        if not repeat and r.notified_at is not None and r.notified_at >= r.due_at:
+            continue
+        out.append(r)
     out.sort(key=lambda r: r.due_at)
     return out
