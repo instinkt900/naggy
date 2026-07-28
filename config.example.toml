@@ -8,7 +8,9 @@ path = "naggy.db"
 [web]
 host = "0.0.0.0"
 port = 8080
-# IANA timezone used for display and for calendar-based (month/year) intervals.
+# IANA timezone used for display and for all interval arithmetic. Reminders are
+# date-grained, so this is also what decides where midnight — the moment a chore
+# becomes pending — actually falls.
 timezone = "UTC"
 
 [notify]
@@ -33,9 +35,10 @@ poll_seconds = 300
 # How long a push service should hold a message for a phone that's offline.
 ttl_seconds = 86400
 
-# Local time of day to hold notifications until, "HH:MM", or "" to push the
-# moment a chore falls due. Worth setting: a reminder's due time is whatever time
-# of day you last marked it done, so without this the nags drift to odd hours.
+# Local time of day to hold notifications until, "HH:MM". Reminders are scheduled
+# by date and fall due at midnight, so leaving this "" would buzz you at 00:00 on
+# the day a chore comes up. The board still turns over at midnight either way —
+# only the push waits.
 notify_at = "08:00"
 # Never buzz or ring — notifications just appear in the shade.
 silent = false

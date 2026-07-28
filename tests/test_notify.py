@@ -25,7 +25,7 @@ NOW = 1_800_000_000
 MELB = ZoneInfo("Australia/Melbourne")
 
 
-def _epoch(y, mo, d, h, mi, tz=MELB):
+def _epoch(y, mo, d, h=0, mi=0, tz=MELB):
     return int(datetime(y, mo, d, h, mi, tzinfo=tz).timestamp())
 
 
@@ -80,19 +80,23 @@ def test_selection_is_most_overdue_first():
 # --- notify_at: holding the push until a civilised hour ----------------------
 
 
-def test_notify_time_waits_for_the_next_morning():
-    # Due 13:50 Tuesday with an 08:00 notify time -> pushed Wednesday morning.
+def test_notify_time_is_the_morning_of_the_due_day():
+    # The normal case now that reminders fall due at midnight: the nag lands at
+    # 08:00 on the day the chore comes up, not at 00:00 and not a day late.
+    due = _epoch(2026, 7, 28)
+    got = schedule.notify_time(due, MELB, 8, 0)
+    d = datetime.fromtimestamp(got, MELB)
+    assert (d.day, d.hour, d.minute) == (28, 8, 0), d
+
+
+def test_notify_time_never_fires_before_due():
+    # A legacy row from before the day grid can still carry a time of day. If the
+    # hour has already passed it slips to the next morning — late, never early.
     due = _epoch(2026, 7, 28, 13, 50)
     got = schedule.notify_time(due, MELB, 8, 0)
     d = datetime.fromtimestamp(got, MELB)
     assert (d.day, d.hour, d.minute) == (29, 8, 0), d
-
-
-def test_notify_time_same_day_when_the_hour_is_still_ahead():
-    due = _epoch(2026, 7, 28, 6, 15)
-    got = schedule.notify_time(due, MELB, 8, 0)
-    d = datetime.fromtimestamp(got, MELB)
-    assert (d.day, d.hour, d.minute) == (28, 8, 0), d
+    assert got > due
 
 
 def test_notify_time_exactly_on_the_hour_does_not_slip_a_day():
@@ -110,17 +114,32 @@ def test_notify_time_holds_the_wall_clock_hour_across_dst():
         assert (d.hour, d.minute) == (8, 0), d
 
 
-def test_reminder_stays_quiet_until_its_notify_time():
-    due = _epoch(2026, 7, 28, 13, 50)
+def test_reminder_is_pending_at_midnight_but_quiet_until_the_notify_hour():
+    # The two halves of the day-grained behaviour pulling in opposite directions:
+    # the chore is genuinely pending from 00:00 (the board shows it), and the push
+    # still waits for 08:00.
+    due = _epoch(2026, 7, 28)
     r = _r("sheets", due)
-    at_due = schedule.due_for_notification([r], due, tz=MELB, notify_at=(8, 0))
-    assert at_due == [], "should be held until 08:00"
-    next_morning = _epoch(2026, 7, 29, 8, 0)
-    assert len(schedule.due_for_notification([r], next_morning, tz=MELB, notify_at=(8, 0))) == 1
+    assert r.is_pending(due), "pending from midnight"
+    assert schedule.due_for_notification([r], due, tz=MELB, notify_at=(8, 0)) == []
+    at_seven = _epoch(2026, 7, 28, 7, 59)
+    assert schedule.due_for_notification([r], at_seven, tz=MELB, notify_at=(8, 0)) == []
+    at_eight = _epoch(2026, 7, 28, 8, 0)
+    assert len(schedule.due_for_notification([r], at_eight, tz=MELB, notify_at=(8, 0))) == 1
+
+
+def test_a_missed_notify_hour_still_pushes_late():
+    # Server was down all morning: the pass that finally runs must not decide the
+    # window has closed and stay silent until tomorrow.
+    due = _epoch(2026, 7, 28)
+    got = schedule.due_for_notification(
+        [_r("sheets", due)], _epoch(2026, 7, 30, 16, 0), tz=MELB, notify_at=(8, 0)
+    )
+    assert [r.title for r in got] == ["sheets"], got
 
 
 def test_no_notify_at_pushes_as_soon_as_due():
-    due = _epoch(2026, 7, 28, 13, 50)
+    due = _epoch(2026, 7, 28)
     assert len(schedule.due_for_notification([_r("sheets", due)], due)) == 1
 
 
@@ -134,8 +153,8 @@ def test_repeat_re_selects_an_already_notified_reminder():
 
 
 def test_repeat_still_respects_the_notify_time():
-    # Repeating must not become a licence to nag before the chosen hour.
-    due = _epoch(2026, 7, 28, 13, 50)
+    # Repeating must not become a licence to nag at midnight.
+    due = _epoch(2026, 7, 28)
     r = _r("sheets", due, notified_at=due - 30 * DAY)
     got = schedule.due_for_notification([r], due, tz=MELB, notify_at=(8, 0), repeat=True)
     assert got == [], got
@@ -151,47 +170,58 @@ def test_repeat_does_not_resurrect_upcoming_or_archived():
 
 
 def test_repost_is_silent_and_does_not_realert():
-    p = notify.build_payload([_r("sheets", NOW - DAY)], NOW, repost=True)
+    p = notify.build_payload([_r("sheets", NOW - DAY)], NOW, MELB, repost=True)
     assert p["silent"] is True, p
     assert p["renotify"] is False, p
 
 
 def test_first_notification_alerts_unless_configured_silent():
-    p = notify.build_payload([_r("sheets", NOW - DAY)], NOW)
+    p = notify.build_payload([_r("sheets", NOW - DAY)], NOW, MELB)
     assert p["silent"] is False and p["renotify"] is True, p
-    quiet = notify.build_payload([_r("sheets", NOW - DAY)], NOW, silent=True)
+    quiet = notify.build_payload([_r("sheets", NOW - DAY)], NOW, MELB, silent=True)
     assert quiet["silent"] is True and quiet["renotify"] is True, quiet
 
 
 def test_badge_count_defaults_to_the_batch_but_can_be_overridden():
     rems = [_r("a", NOW - DAY), _r("b", NOW - 10)]
-    assert notify.build_payload(rems, NOW)["badge_count"] == 2
+    assert notify.build_payload(rems, NOW, MELB)["badge_count"] == 2
     # The true pending total can exceed the handful being pushed this pass.
-    assert notify.build_payload(rems, NOW, badge_count=5)["badge_count"] == 5
+    assert notify.build_payload(rems, NOW, MELB, badge_count=5)["badge_count"] == 5
 
 
 def test_single_payload_uses_the_reminder_title():
-    p = notify.build_payload([_r("Clean bedsheets", NOW - 2 * DAY)], NOW)
+    due = _epoch(2026, 7, 26)
+    p = notify.build_payload([_r("Clean bedsheets", due)], _epoch(2026, 7, 28, 9, 0), MELB)
     assert p["title"] == "Clean bedsheets", p
-    assert "overdue" in p["body"], p
+    assert p["body"] == "2 days overdue", p
     assert p["tag"] == "naggy-pending", p
 
 
+def test_single_payload_body_is_day_grained():
+    # Pushed at 08:00 on the morning a chore falls due (midnight): it reads as due
+    # today, not as "8 hours overdue".
+    due = _epoch(2026, 7, 28)
+    p = notify.build_payload([_r("Clean bedsheets", due)], _epoch(2026, 7, 28, 8, 0), MELB)
+    assert p["body"] == "due today", p
+
+
 def test_single_payload_appends_notes():
-    p = notify.build_payload([_r("Clean bedsheets", NOW - 10, notes="Hot wash")], NOW)
+    p = notify.build_payload(
+        [_r("Clean bedsheets", NOW - 10, notes="Hot wash")], NOW, MELB
+    )
     assert p["body"].endswith("Hot wash"), p
 
 
 def test_grouped_payload_counts_and_lists():
     rems = [_r("sheets", NOW - DAY), _r("bins", NOW - 10), _r("filter", NOW - 5)]
-    p = notify.build_payload(rems, NOW)
+    p = notify.build_payload(rems, NOW, MELB)
     assert p["title"] == "3 chores need doing", p
     assert p["body"] == "sheets, bins, filter", p
 
 
 def test_payload_body_is_bounded():
     rems = [_r("chore number %d" % i, NOW - 10) for i in range(200)]
-    p = notify.build_payload(rems, NOW)
+    p = notify.build_payload(rems, NOW, MELB)
     assert len(p["body"]) <= 300, len(p["body"])
 
 

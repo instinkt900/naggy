@@ -29,7 +29,7 @@ from fastapi.templating import Jinja2Templates
 
 from naggy import __version__, notify, schedule
 from naggy.config import load_config
-from naggy.constants import INTERVAL_UNITS, KINDS, humanize_delta
+from naggy.constants import INTERVAL_UNITS, KINDS, humanize_days
 from naggy.db import Database
 from naggy.models import Reminder
 
@@ -40,9 +40,9 @@ log = logging.getLogger(__name__)
 
 def create_app(config_path: str) -> FastAPI:
     cfg = load_config(config_path)
-    db = Database(cfg.database.path)
-    db.init_db()
     tz = ZoneInfo(cfg.web.timezone)
+    db = Database(cfg.database.path)
+    db.init_db(tz)
 
     # Derived once at startup: "" means push is off or misconfigured, which the UI
     # reads as "notifications unavailable" rather than an error.
@@ -114,10 +114,13 @@ def create_app(config_path: str) -> FastAPI:
         return int(time.time())
 
     def local_str(ts: int) -> str:
-        return datetime.fromtimestamp(ts, tz).strftime("%a %d %b, %H:%M")
+        # Date only: reminders are due on a day, so showing a time of day would
+        # imply a precision the schedule doesn't have.
+        return datetime.fromtimestamp(ts, tz).strftime("%a %d %b")
 
     def reminder_json(r: Reminder, now: int) -> dict:
         due_in = r.due_at - now
+        due_in_days = schedule.days_until(r.due_at, now, tz)
         return {
             "id": r.id,
             "title": r.title,
@@ -129,8 +132,12 @@ def create_app(config_path: str) -> FastAPI:
             "due_at": r.due_at,
             "due_at_ms": r.due_at * 1000,
             "due_local": local_str(r.due_at),
+            # Both grains are published: `due_in_days` is what Naggy actually
+            # schedules on and what the UI shows, `due_in_seconds` stays for any
+            # consumer of the JSON seam that wants the raw distance.
+            "due_in_days": due_in_days,
             "due_in_seconds": due_in,
-            "human": humanize_delta(due_in),
+            "human": humanize_days(due_in_days),
             "status": r.status_at(now),
         }
 

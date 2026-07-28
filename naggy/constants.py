@@ -10,36 +10,35 @@ from __future__ import annotations
 # A reminder either repeats forever on a cadence or fires exactly once.
 KINDS = ("recurring", "oneshot")
 
-# Interval units a cadence can be expressed in. day/week are fixed-length; month
-# and year are calendar-based (see schedule.next_due for the clamping rules).
+# Interval units a cadence can be expressed in. All four are calendar-based — see
+# schedule.next_due, which works on local dates and clamps the day-of-month.
 INTERVAL_UNITS = ("day", "week", "month", "year")
 
-_UNIT_SECONDS = {"day": 86_400, "week": 604_800}
+# Whole days per fixed-length unit. month/year aren't here because they aren't a
+# fixed number of days; they're calendar hops.
+_UNIT_DAYS = {"day": 1, "week": 7}
 
 
-def humanize_delta(seconds: int) -> str:
-    """Render a signed second-delta as a human phrase, e.g. "in 3 days" or
-    "2 days overdue". `seconds` is (due_at - now): positive = still upcoming,
-    zero/negative = pending. Used only for display."""
-    if seconds <= 0:
-        overdue = -seconds
-        if overdue < 60:
-            return "due now"
-        return f"{_coarse(overdue)} overdue"
-    if seconds < 60:
-        return "due in under a minute"
-    return f"in {_coarse(seconds)}"
+def humanize_days(days: int) -> str:
+    """Render a whole-day offset (due date minus today) as a human phrase.
+
+    `days` is what `schedule.days_until` returns: 0 = due today, positive = still
+    upcoming, negative = overdue by that many days. Naggy schedules by date, so
+    counting down in hours would be false precision *and* misleading — a chore due
+    tomorrow shouldn't read "in 6 hours" just because you checked in the evening.
+    Used only for display.
+    """
+    if days == 0:
+        return "due today"
+    if days == 1:
+        return "due tomorrow"
+    if days < 0:
+        return f"{_coarse_days(-days)} overdue"
+    return f"in {_coarse_days(days)}"
 
 
-def _coarse(seconds: int) -> str:
-    """Largest sensible single unit for a positive duration."""
-    minutes = seconds // 60
-    if minutes < 60:
-        return _plural(minutes, "minute")
-    hours = minutes // 60
-    if hours < 24:
-        return _plural(hours, "hour")
-    days = hours // 24
+def _coarse_days(days: int) -> str:
+    """Largest sensible single unit for a positive whole-day count."""
     if days < 14:
         return _plural(days, "day")
     if days < 60:

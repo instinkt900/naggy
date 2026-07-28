@@ -52,9 +52,10 @@ class NotifyConfig:
     poll_seconds: int = 300
     # How long the push service should hold a message for a phone that's offline.
     ttl_seconds: int = 86_400
-    # Local "HH:MM" to hold notifications until, or "" to push the moment a chore
-    # falls due (which is whatever time of day it was last addressed).
-    notify_at: str = ""
+    # Local "HH:MM" to hold notifications until. Reminders fall due at midnight
+    # (Naggy schedules by date), so the default holds the nag until a reasonable
+    # hour; "" would push it at 00:00 on the day the chore is due.
+    notify_at: str = "08:00"
     # Never buzz or ring — the notification just appears in the shade.
     silent: bool = False
     # Re-push an outstanding chore on every pass, so swiping the notification away

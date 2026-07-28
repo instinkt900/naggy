@@ -1,3 +1,3 @@
 """Naggy — a phone-first reminder app for recurring and one-off household chores."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

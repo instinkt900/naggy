@@ -6,45 +6,76 @@ set of reminders and "now" it splits them into pending vs upcoming. Everything i
 a plain function taking its inputs as arguments (including the timezone), so it is
 trivially covered by the plain-assert tests in `tests/`.
 
-Timestamps are UTC epoch seconds. day/week intervals are fixed-length additions.
-month/year intervals are *calendar* additions performed on the local date so that
-"every month" lands on the same day-of-month in the configured timezone, clamping
-to the last valid day when the target month is shorter (Jan 31 + 1 month -> Feb 28
-or 29).
+Timestamps are UTC epoch seconds, but Naggy schedules by *date*: a chore is due on
+a day, not at a time of day. Every due moment is therefore the local midnight that
+opens its day, and all interval arithmetic — day and week included — is done on
+the local calendar date rather than by adding seconds. That is what makes a chore
+turn pending at midnight instead of at whatever o'clock you last ticked it off,
+and it keeps day/week intervals honest across a DST change, which a fixed multiple
+of 86_400 is not. month/year additionally clamp the day-of-month when the target
+month is shorter (Jan 31 + 1 month -> Feb 28 or 29).
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from naggy.constants import _UNIT_SECONDS
+from naggy.constants import _UNIT_DAYS
 from naggy.models import Reminder
 
 
 def next_due(from_epoch: int, n: int, unit: str, tz: ZoneInfo) -> int:
-    """Return the epoch-second timestamp `n` `unit`s after `from_epoch`.
+    """Return local midnight opening the day `n` `unit`s after `from_epoch`'s date.
 
-    day/week are exact multiples of seconds. month/year are calendar hops on the
-    local date, preserving the time-of-day and clamping the day-of-month.
+    The time of day `from_epoch` happens to carry is deliberately discarded: a
+    reminder completed at 23:50 and one completed at 00:10 the next morning are
+    both "done today", so both should next fall due on the same date.
     """
     if n < 1:
         raise ValueError(f"interval count must be >= 1, got {n}")
 
-    if unit in _UNIT_SECONDS:
-        return from_epoch + n * _UNIT_SECONDS[unit]
+    local = datetime.fromtimestamp(from_epoch, tz).date()
 
-    if unit not in ("month", "year"):
+    if unit in _UNIT_DAYS:
+        target = local + timedelta(days=n * _UNIT_DAYS[unit])
+    elif unit in ("month", "year"):
+        months = n if unit == "month" else n * 12
+        total = (local.year * 12 + (local.month - 1)) + months
+        year, month = divmod(total, 12)
+        month += 1
+        target = date(year, month, min(local.day, _days_in_month(year, month)))
+    else:
         raise ValueError(f"unknown interval unit: {unit!r}")
 
-    local = datetime.fromtimestamp(from_epoch, tz)
-    months = n if unit == "month" else n * 12
-    total = (local.year * 12 + (local.month - 1)) + months
-    year, month = divmod(total, 12)
-    month += 1
-    day = min(local.day, _days_in_month(year, month))
-    shifted = local.replace(year=year, month=month, day=day)
-    return int(shifted.timestamp())
+    return start_of_day_on(target, tz)
+
+
+def start_of_day(epoch: int, tz: ZoneInfo) -> int:
+    """Local midnight opening the day `epoch` falls in.
+
+    Used to pull a legacy time-of-day `due_at` back onto the day grid (see the
+    migration in `db.init_db`).
+    """
+    return start_of_day_on(datetime.fromtimestamp(epoch, tz).date(), tz)
+
+
+def start_of_day_on(day: date, tz: ZoneInfo) -> int:
+    """Epoch seconds at local midnight opening `day`."""
+    return int(datetime(day.year, day.month, day.day, tzinfo=tz).timestamp())
+
+
+def days_until(due_at: int, now: int, tz: ZoneInfo) -> int:
+    """Whole local days from today's date to the due date.
+
+    0 means due today, 1 tomorrow, negative means overdue by that many days. This
+    is a *date* subtraction, not a seconds one, so it doesn't matter what time of
+    day you look: something due tomorrow reads as one day away at 09:00 and at
+    23:00 alike.
+    """
+    due_day = datetime.fromtimestamp(due_at, tz).date()
+    today = datetime.fromtimestamp(now, tz).date()
+    return (due_day - today).days
 
 
 def _days_in_month(year: int, month: int) -> int:
@@ -77,14 +108,16 @@ def board(reminders: list[Reminder], now: int) -> dict[str, list[Reminder]]:
 def notify_time(due_at: int, tz: ZoneInfo, hour: int, minute: int) -> int:
     """First moment at or after `due_at` whose local clock reads `hour:minute`.
 
-    Lets the nag land at a civilised hour without disturbing the schedule: a
-    reminder still *becomes due* at its own anniversary (which is whatever time of
-    day it was last addressed), we just hold the notification until the next
-    hour:minute. A chore falling due at 13:50 with a 08:00 notify time is pushed
-    the following morning, not eighteen hours early.
+    Lets the nag land at a civilised hour without disturbing the schedule. A
+    reminder becomes due at midnight — that's the day grid — and nobody wants to
+    be buzzed then, so the notification is held until the morning of the day it
+    falls due. Kept separate from `due_at` rather than folded into it so the board
+    still turns over at midnight; only the push waits.
 
     Arithmetic is on the local wall clock, so the hour stays put across a DST
-    change rather than sliding by an hour.
+    change rather than sliding by an hour. A `due_at` that isn't midnight (a row
+    predating the day grid, say) slips to the following morning if the hour has
+    already gone by, which is the safe direction — never earlier than due.
     """
     local = datetime.fromtimestamp(due_at, tz)
     candidate = local.replace(hour=hour, minute=minute, second=0, microsecond=0)

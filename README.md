@@ -79,14 +79,16 @@ prove the chain works.
 
 ### When a nag actually fires
 
-A reminder becomes due at its own anniversary — `due_at` is simply
-`last done + interval`, so the **time of day is whatever time you last marked it
-done** (or created it). Left alone, that drifts: tick a chore off at 22:40 once and
-it will nag at 22:40 from then on.
+Reminders are scheduled **by date**, so a chore becomes pending at **local
+midnight** on the day it falls due. Nobody wants to be buzzed then, so the push is
+held until `notify_at` — `"08:00"` by default — on that same morning. The board and
+the notification are deliberately separate: open the app at 00:30 and the chore is
+already sitting in Pending actions; the phone just doesn't ring about it until 8am.
 
-Set `notify_at = "08:00"` to decouple the two. The reminder still falls due when it
-falls due (and shows as pending in the app immediately), but the push is held until
-the next 08:00 local. The hour is held on the wall clock, so it survives DST.
+Change the hour with `[notify] notify_at = "HH:MM"` (24-hour, local). It's held on
+the wall clock, so it survives DST. Setting it to `""` pushes at midnight. If a
+pass is missed — server down all morning — the nag still goes out when the server
+comes back, rather than waiting for the next day.
 
 ### Making a nag hard to ignore
 
@@ -108,11 +110,19 @@ Every reminder has a canonical `due_at` (UTC epoch seconds) — the moment it be
 pending (`now >= due_at`). Recurring reminders carry an interval `(n, unit)` where
 unit is `day | week | month | year`; on completion the timer resets via
 `schedule.next_due`. One-off reminders are archived (kept for history, hidden from
-lists) on completion. `day`/`week` are fixed-length; `month`/`year` are calendar
-hops on the local date with end-of-month clamping (Jan 31 + 1 month → Feb 28/29).
+lists) on completion.
+
+Naggy is **date-grained**: `due_at` is always the local midnight that opens the day
+a chore is due, and the interval arithmetic is done on local calendar dates rather
+than by adding seconds. All four units are therefore calendar hops — `month`/`year`
+additionally clamp the day-of-month when the target month is shorter (Jan 31 +
+1 month → Feb 28/29). Doing it this way is what makes a chore turn pending at
+midnight instead of at whatever o'clock you last ticked it off, and it also keeps
+`day`/`week` honest across a DST change, which a fixed multiple of 86,400 is not.
 
 Timestamps are UTC epoch seconds everywhere internally; timezone conversion happens
-only in the web layer. See `naggy/schedule.py` (pure, unit-tested) for the maths.
+only in the web layer, and `[web] timezone` is what decides where midnight falls.
+See `naggy/schedule.py` (pure, unit-tested) for the maths.
 
 ## Web routes
 

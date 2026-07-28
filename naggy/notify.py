@@ -26,7 +26,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from naggy import schedule
-from naggy.constants import humanize_delta
+from naggy.constants import humanize_days
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps imports lazy at runtime
     from zoneinfo import ZoneInfo
@@ -175,6 +175,7 @@ def send_to_all(db: Database, cfg: Config, payload: dict, now: int) -> dict:
 def build_payload(
     reminders: list,
     now: int,
+    tz: ZoneInfo,
     *,
     silent: bool = False,
     repost: bool = False,
@@ -195,7 +196,7 @@ def build_payload(
     if len(reminders) == 1:
         r = reminders[0]
         title = r.title
-        body = humanize_delta(r.due_at - now)
+        body = humanize_days(schedule.days_until(r.due_at, now, tz))
         if r.notes:
             body = f"{body} · {r.notes}"
     else:
@@ -240,7 +241,7 @@ def run_pass(
         r.notified_at is not None and r.notified_at >= r.due_at for r in due
     )
     payload = build_payload(
-        due, now,
+        due, now, tz,
         silent=cfg.notify.silent,
         repost=repost,
         # Badge the true pending total, which under the default once-per-cycle

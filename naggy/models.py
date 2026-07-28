@@ -16,7 +16,7 @@ class Reminder:
     kind: str = "recurring"            # 'recurring' | 'oneshot'
     interval_n: int | None = None       # cadence count, e.g. the 2 in "every 2 weeks"
     interval_unit: str | None = None    # 'day' | 'week' | 'month' | 'year'
-    due_at: int = 0                     # epoch s; the moment it becomes pending
+    due_at: int = 0                     # epoch s at local midnight opening the day it's due
     notes: str = ""
     last_done_at: int | None = None     # epoch s of the last completion, if any
     created_at: int = 0
@@ -25,7 +25,12 @@ class Reminder:
     id: int | None = None
 
     def is_pending(self, now: int) -> bool:
-        """Pending == active and its due moment has arrived/passed."""
+        """Pending == active and its due moment has arrived/passed.
+
+        `due_at` is local midnight (see `schedule.next_due`), so in practice this
+        flips over at the start of the day the chore is due — no timezone needed
+        here, the day boundary is already baked into the stored timestamp.
+        """
         return self.active and now >= self.due_at
 
     def status_at(self, now: int) -> str:

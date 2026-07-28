@@ -31,10 +31,11 @@ naggy/
   web.py         FastAPI app factory (create_app); all routes as closures; tz helpers
   db.py          SQLite schema + Database wrapper (short-lived connections)
   models.py      dataclasses: Reminder, Completion, PushSubscription
-  schedule.py    PURE maths: next_due, board, due_for_notification, notify_time
+  schedule.py    PURE maths: next_due, start_of_day, days_until, board,
+                 due_for_notification, notify_time
   notify.py      Web Push: VAPID keys, pywebpush sending, the notify pass
   config.py      TOML loader; dataclasses; _known() rejects unknown keys; secrets from env only
-  constants.py   KINDS, INTERVAL_UNITS, humanize_delta
+  constants.py   KINDS, INTERVAL_UNITS, humanize_days
   templates/     base.html, phone/index.html, partials/board.html
   static/        style.css, common.js, phone.js, sw.js, htmx.min.js (vendored), icons/
 docker/          Dockerfile, docker-compose.yml
@@ -47,13 +48,23 @@ config.example.toml   the only tracked config; real config.toml is gitignored
 
 - **Timestamps are UTC epoch seconds (int) everywhere internally.** Timezone
   conversion happens only in the web layer.
+- **Naggy is date-grained.** `due_at` is *always* the local midnight opening the day
+  a chore is due, so a reminder turns pending at midnight rather than at whatever
+  o'clock it was last addressed. Nothing user-facing should count in hours or
+  minutes — use `schedule.days_until` + `constants.humanize_days`, and keep dates
+  displayed without a time of day.
 - Each reminder has a canonical **`due_at`**; it is *pending* when `now >= due_at`
   and `active`. Recurring: `interval_n` + `interval_unit` (`day|week|month|year`);
   on completion `due_at = schedule.next_due(now, n, unit, tz)`, stays active.
   One-shot: `active` set to 0 on completion (archived; completion history kept).
 - **Keep `schedule.py` pure** (no I/O, no wall clock, no config — tz is passed in).
-  New deterministic maths goes there and gets covered in `tests/`. day/week are
-  fixed-length; month/year are calendar hops with end-of-month clamping.
+  New deterministic maths goes there and gets covered in `tests/`. All four units
+  are calendar hops on the local date (which is also why day/week survive DST);
+  month/year additionally clamp the end of month.
+- `db.init_db(tz)` takes the timezone because data migrations need to know where
+  the day boundary is. Column additions stay guarded by `_has_column`; **row
+  rewrites need a `PRAGMA user_version` bump** (`_USER_VERSION` in `db.py`) since
+  they leave no trace to detect.
 
 ## Web routes (all in `web.py`)
 
@@ -80,8 +91,9 @@ naggy vapid-keys
 ## Configuration
 
 One TOML (`config.toml`; template `config.example.toml`). Sections `[database]`
-(path), `[web]` (host/port/timezone) and `[notify]`
-(enabled/subject/poll_seconds/ttl_seconds). `config.py` uses dataclasses +
+(path), `[web]` (host/port/timezone — also decides where local midnight falls) and
+`[notify]` (enabled/subject/poll_seconds/ttl_seconds/notify_at/silent/
+repeat_while_pending/badge). `config.py` uses dataclasses +
 `_known()` so an **unknown key/section fails loudly**. Secrets come from **env
 only**, never the TOML: `NAGGY_VAPID_PRIVATE_KEY` today, `NAGGY_HA_TOKEN` in
 future — since they aren't fields of any section, `_known()` rejects them
@@ -110,9 +122,10 @@ signs/encrypts each message, so no third-party notification service is involved
 - `reminders.notified_at` stamps the last push for the **current due cycle**. The
   once-per-cycle rule falls out of `notified_at < due_at` arithmetic — see
   `schedule.due_for_notification` (pure, tested in `tests/test_notify.py`).
-- `notify_at = "HH:MM"` holds a push until that local time via
-  `schedule.notify_time`, without touching `due_at` — a reminder's due time-of-day
-  is just whenever it was last addressed, so it drifts and shouldn't drive nags.
+- `notify_at = "HH:MM"` (default `"08:00"`) holds a push until that local time via
+  `schedule.notify_time`, **without touching `due_at`** — reminders fall due at
+  midnight and the board must turn over then; only the nag waits for a civilised
+  hour. Keep those two concerns separate.
 - `repeat_while_pending` drops the once-per-cycle rule so a swiped-away
   notification comes back. Reposts are forced `silent` with `renotify: false`;
   only the first notification of a cycle alerts. **Non-dismissible notifications

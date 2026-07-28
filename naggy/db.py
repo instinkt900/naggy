@@ -3,7 +3,8 @@
 The `Database` wrapper holds only a path and hands out short-lived connections
 (one per operation via `with self.connect()`), each with WAL and foreign keys on.
 The whole schema is a single `_SCHEMA` string of `CREATE ... IF NOT EXISTS`
-statements; `init_db()` runs it (plus any guarded `ALTER TABLE` migrations) on
+statements; `init_db(tz)` runs it (plus any pending migrations — guarded
+`ALTER TABLE`s for columns, a `PRAGMA user_version` bump for row rewrites) on
 every startup, so it is idempotent and forward-only. Rows map to/from the
 dataclasses in `models.py` via the `_reminder` / `_completion` helpers.
 """
@@ -25,7 +26,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     kind          TEXT    NOT NULL DEFAULT 'recurring',   -- 'recurring' | 'oneshot'
     interval_n    INTEGER,                                 -- cadence count
     interval_unit TEXT,                                    -- day|week|month|year
-    due_at        INTEGER NOT NULL,                         -- epoch s; pending when now>=due_at
+    due_at        INTEGER NOT NULL,                         -- epoch s at local midnight; pending when now>=due_at
     last_done_at  INTEGER,                                  -- epoch s; NULL until first done
     created_at    INTEGER NOT NULL,
     active        INTEGER NOT NULL DEFAULT 1,
@@ -53,6 +54,10 @@ CREATE TABLE IF NOT EXISTS completions (
 CREATE INDEX IF NOT EXISTS idx_completions_reminder ON completions(reminder_id, done_at);
 """
 
+# Schema version for data migrations that can't be detected by inspection.
+#   1: due_at snapped to local midnight (reminders became date-grained).
+_USER_VERSION = 1
+
 # Columns a PATCH is allowed to touch (whitelist guards against arbitrary writes).
 _UPDATABLE = {"title", "notes", "kind", "interval_n", "interval_unit", "due_at", "active"}
 
@@ -68,8 +73,12 @@ class Database:
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
-    def init_db(self) -> None:
-        """Create the schema (and run any additive migrations) — idempotent."""
+    def init_db(self, tz: ZoneInfo) -> None:
+        """Create the schema (and run any pending migrations) — idempotent.
+
+        `tz` is needed by the data migrations, which have to know where the local
+        day boundary falls; it's the same configured timezone the web layer uses.
+        """
         parent = Path(self.path).parent
         if str(parent) not in ("", "."):
             parent.mkdir(parents=True, exist_ok=True)
@@ -79,6 +88,34 @@ class Database:
             # `_SCHEMA` carries the same columns so fresh installs skip all of this.
             if not self._has_column(conn, "reminders", "notified_at"):
                 conn.execute("ALTER TABLE reminders ADD COLUMN notified_at INTEGER")
+            self._migrate_data(conn, tz)
+
+    def _migrate_data(self, conn: sqlite3.Connection, tz: ZoneInfo) -> None:
+        """Row rewrites, tracked by `PRAGMA user_version`.
+
+        The `ALTER TABLE` guards above are self-describing — a column either
+        exists or it doesn't — but a data rewrite leaves no such trace, so it
+        needs a version stamp of its own or it would run again on every startup.
+        A fresh database is at version 0 too and simply migrates zero rows.
+        """
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+        if version < 1:
+            # v1: reminders became date-grained. They used to fall due at whatever
+            # time of day they were last addressed; pull every existing due_at back
+            # to the midnight that opens its day. Rounding *down* is deliberate —
+            # "due today at 18:00" means the day has come, so it should be pending
+            # now rather than waiting out the evening.
+            for row in conn.execute("SELECT id, due_at FROM reminders").fetchall():
+                snapped = schedule.start_of_day(row["due_at"], tz)
+                if snapped != row["due_at"]:
+                    conn.execute(
+                        "UPDATE reminders SET due_at = ? WHERE id = ?", (snapped, row["id"])
+                    )
+
+        # Not parameterisable — PRAGMA takes a literal — hence the f-string over a
+        # module constant rather than user input.
+        conn.execute(f"PRAGMA user_version = {_USER_VERSION}")
 
     @staticmethod
     def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:

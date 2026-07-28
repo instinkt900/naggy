@@ -53,10 +53,12 @@ def main(argv: list[str] | None = None) -> int:
         return run_serve(args.config)
 
     if args.command == "init-db":
+        from zoneinfo import ZoneInfo
+
         from naggy.config import load_config
         from naggy.db import Database
         cfg = load_config(args.config)
-        Database(cfg.database.path).init_db()
+        Database(cfg.database.path).init_db(ZoneInfo(cfg.web.timezone))
         print(f"initialized database at {cfg.database.path}")
         return 0
 
@@ -81,9 +83,9 @@ def _notify(config_path: str, *, dry_run: bool) -> int:
     from naggy.db import Database
 
     cfg = load_config(config_path)
-    db = Database(cfg.database.path)
-    db.init_db()
     tz = ZoneInfo(cfg.web.timezone)
+    db = Database(cfg.database.path)
+    db.init_db(tz)
 
     try:
         result = notify.run_pass(db, cfg, int(time.time()), tz, dry_run=dry_run)
@@ -135,15 +137,18 @@ def _report(config_path: str, *, as_json: bool) -> int:
 
     from naggy import schedule
     from naggy.config import load_config
-    from naggy.constants import humanize_delta
+    from naggy.constants import humanize_days
     from naggy.db import Database
 
     cfg = load_config(config_path)
-    db = Database(cfg.database.path)
-    db.init_db()
     tz = ZoneInfo(cfg.web.timezone)
+    db = Database(cfg.database.path)
+    db.init_db(tz)
     now = int(time.time())
     b = schedule.board(db.list_active(), now)
+
+    def human(r):
+        return humanize_days(schedule.days_until(r.due_at, now, tz))
 
     def row(r):
         return {
@@ -151,8 +156,9 @@ def _report(config_path: str, *, as_json: bool) -> int:
             "title": r.title,
             "kind": r.kind,
             "due_at": r.due_at,
+            "due_in_days": schedule.days_until(r.due_at, now, tz),
             "due_in_seconds": r.due_at - now,
-            "human": humanize_delta(r.due_at - now),
+            "human": human(r),
         }
 
     if as_json:
@@ -166,12 +172,12 @@ def _report(config_path: str, *, as_json: bool) -> int:
 
     print(f"Pending actions ({len(b['pending'])}):")
     for r in b["pending"]:
-        print(f"  • {r.title}  [{humanize_delta(r.due_at - now)}]")
+        print(f"  • {r.title}  [{human(r)}]")
     if not b["pending"]:
         print("  (none)")
     print(f"\nUpcoming ({len(b['upcoming'])}):")
     for r in b["upcoming"]:
-        print(f"  • {r.title}  [{humanize_delta(r.due_at - now)}]")
+        print(f"  • {r.title}  [{human(r)}]")
     if not b["upcoming"]:
         print("  (none)")
     return 0
