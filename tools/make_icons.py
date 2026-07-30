@@ -11,7 +11,7 @@ icons are fully reproducible: re-run this script to regenerate them.
 
 Writes into naggy/static/icons/: icon-192.png, icon-512.png,
 icon-maskable-512.png (full-bleed, glyph in the safe zone), apple-touch-icon.png
-(180px, opaque square).
+(180px, opaque square), icon-badge-96.png (transparent, bell only — see below).
 """
 
 from __future__ import annotations
@@ -87,6 +87,22 @@ def make(size: int, *, rounded: bool, glyph_frac: float, opaque: bool) -> Image.
     return out
 
 
+def make_badge(size: int, *, glyph_frac: float = 0.82) -> Image.Image:
+    """The notification `badge` — bare bell on transparency, no amber square.
+
+    Android throws away every channel but alpha here and paints the result white
+    in the status bar, so an opaque icon (like icon-192) masks down to a solid
+    white block. Only the glyph may carry alpha. The canvas is white-at-alpha-0
+    rather than black so the LANCZOS downscale can't leave a dark fringe on
+    platforms that *do* use the colour channels.
+    """
+    px = size * SS
+    canvas = Image.new("RGBA", (px, px), (255, 255, 255, 0))
+    g = px * glyph_frac
+    _draw_bell(ImageDraw.Draw(canvas), ((px - g) / 2, (px - g) / 2, g))
+    return canvas.resize((size, size), Image.LANCZOS)
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     make(192, rounded=True, glyph_frac=0.66, opaque=False).save(OUT / "icon-192.png")
@@ -95,7 +111,9 @@ def main() -> None:
     make(512, rounded=False, glyph_frac=0.56, opaque=True).save(OUT / "icon-maskable-512.png")
     # apple: opaque square (iOS applies its own mask)
     make(180, rounded=False, glyph_frac=0.64, opaque=True).save(OUT / "apple-touch-icon.png")
-    print(f"wrote 4 icons to {OUT}")
+    # notification badge: Android's status-bar small icon, alpha-masked to white
+    make_badge(96).save(OUT / "icon-badge-96.png")
+    print(f"wrote 5 icons to {OUT}")
 
 
 if __name__ == "__main__":

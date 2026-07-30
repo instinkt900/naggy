@@ -24,6 +24,7 @@ const SHELL = [
   `/static/htmx.min.js?v=${V}`,
   "/static/icons/icon-192.png",
   "/static/icons/icon-512.png",
+  "/static/icons/icon-badge-96.png",
 ];
 
 self.addEventListener("install", (e) => {
@@ -65,7 +66,10 @@ self.addEventListener("push", (e) => {
     self.registration.showNotification(d.title || "Naggy", {
       body: d.body || "Something needs doing.",
       icon: "/static/icons/icon-192.png",
-      badge: "/static/icons/icon-192.png",
+      // Android reduces `badge` to its alpha channel and paints it white for the
+      // status bar, so this one has to be the bare bell on transparency — point
+      // it at an opaque icon and you get a featureless white square.
+      badge: "/static/icons/icon-badge-96.png",
       tag: d.tag || "naggy",         // replaces the previous nag instead of stacking
       renotify: d.renotify !== false, // reposts replace quietly; only the first alerts
       silent: d.silent === true,
