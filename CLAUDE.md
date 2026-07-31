@@ -59,11 +59,23 @@ config.example.toml   the only tracked config; real config.toml is gitignored
   on completion `due_at = schedule.next_due(now, n, unit, tz)`, stays active.
   One-shot: `active` set to 0 on completion (archived; completion history kept).
 - A cadence fixes how *often* a chore comes round but not which day it lands on, so
-  creation takes an optional **`start_date`** (`YYYY-MM-DD` from the form's date
-  picker) that pins the first `due_at` via `schedule.due_from_date`; blank keeps the
-  old behaviour of one interval from today. It anchors **only the first cycle** —
-  later ones are still measured from when the chore is actually addressed. Editing
-  a reminder's date is the same conversion (`due_date` on the PATCH).
+  creation takes a **`start_date`** (`YYYY-MM-DD` from the form's date picker,
+  pre-filled with today) that pins the first `due_at` via `schedule.due_from_date`.
+  It anchors **only the first cycle** — later ones are still measured from when the
+  chore is actually addressed. Editing a reminder's date is the same conversion
+  (`due_date` on the PATCH). Omitting it falls back to one interval from now, which
+  is what Naggy did before the picker existed, so old API callers still work.
+- **`kind` is a tick box, not a pair of radios.** "Repeats" ticked ⇒ `recurring`;
+  unticked ⇒ `oneshot`, and `phone.js` *disables* the cadence controls — a disabled
+  control isn't submitted, so a one-off sends no interval at all rather than a stale
+  one. `interval_n`/`interval_unit` are therefore **optional** on `POST`; when
+  `kind` is absent entirely it's derived from whether an interval came, so a
+  pre-tick-box request still means what it used to. `kind = recurring` with no
+  interval is a 400.
+- A PATCH that unticks the box leaves the stored cadence alone (only `kind`
+  changes), so re-ticking restores it — the dialog shows it greyed out meanwhile.
+  Nothing reads a one-off's interval: `_interval_label` says "one-time" and
+  `db.complete_reminder` archives on `kind != recurring`.
 - A one-shot's interval is only a way of *typing* its due date, so it isn't shown
   back: `_interval_label` reads `"one-time"` regardless of the stored cadence, which
   is why the stored `interval_n`/`interval_unit` on a one-shot can be ignored.

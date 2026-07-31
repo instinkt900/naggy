@@ -175,6 +175,10 @@ def create_app(config_path: str) -> FastAPI:
                 "board": board_view(now),
                 "kinds": KINDS,
                 "units": INTERVAL_UNITS,
+                # Pre-fills the date picker. Computed here rather than in JS so
+                # "today" means today in the *configured* timezone — the one the
+                # day grid is built on — not wherever the phone happens to be.
+                "today": local_date(now),
             },
         )
 
@@ -229,36 +233,47 @@ def create_app(config_path: str) -> FastAPI:
     def create_reminder(
         request: Request,
         title: str = Form(...),
-        kind: str = Form("recurring"),
-        interval_n: int = Form(...),
-        interval_unit: str = Form(...),
+        kind: str = Form(""),
+        interval_n: int | None = Form(None),
+        interval_unit: str | None = Form(None),
         notes: str = Form(""),
         start_date: str = Form(""),
     ):
         title = title.strip()
         if not title:
             return JSONResponse({"error": "title is required"}, status_code=400)
+
+        # The form's "Repeats" tick box disables the cadence controls when it's
+        # off, and a disabled control isn't submitted — so an absent interval is
+        # itself the signal that this is a one-off. An explicit `kind` still wins,
+        # for anyone driving the API directly.
         if kind not in KINDS:
-            kind = "recurring"
-        if interval_unit not in INTERVAL_UNITS:
+            kind = "recurring" if (interval_n and interval_unit) else "oneshot"
+        if interval_unit is not None and interval_unit not in INTERVAL_UNITS:
             return JSONResponse({"error": f"bad interval_unit: {interval_unit}"}, status_code=400)
-        if interval_n < 1:
+        if interval_n is not None and interval_n < 1:
             return JSONResponse({"error": "interval must be >= 1"}, status_code=400)
+        if kind == "recurring" and not (interval_n and interval_unit):
+            return JSONResponse({"error": "a repeating reminder needs an interval"}, status_code=400)
 
         now = now_epoch()
         # A cadence says how *often* a chore comes round but not which day it lands
-        # on, so an optional start date pins the first one; without it the first due
-        # day is one interval from today, as it always was. Only the first cycle is
-        # anchored — later ones are measured from when the chore is actually
+        # on, so the form picks the first due day outright (defaulting to today).
+        # A caller that omits it falls back to one interval from now, which is what
+        # Naggy did before there was a date picker. Only the first cycle is anchored
+        # either way — later ones are measured from when the chore is actually
         # addressed, which is the point of an "every 2 weeks" reminder.
         start_date = start_date.strip()
-        try:
-            due_at = (
-                schedule.due_from_date(start_date, tz) if start_date
-                else schedule.next_due(now, interval_n, interval_unit, tz)
-            )
-        except ValueError:
-            return JSONResponse({"error": f"bad start date: {start_date}"}, status_code=400)
+        if start_date:
+            try:
+                due_at = schedule.due_from_date(start_date, tz)
+            except ValueError:
+                return JSONResponse({"error": f"bad start date: {start_date}"}, status_code=400)
+        elif interval_n and interval_unit:
+            due_at = schedule.next_due(now, interval_n, interval_unit, tz)
+        else:
+            # Nothing to date it from: a one-off with no date has no due day at all.
+            return JSONResponse({"error": "a due date is required"}, status_code=400)
 
         r = Reminder(
             title=title,

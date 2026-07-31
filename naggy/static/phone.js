@@ -1,23 +1,41 @@
 // Phone UI glue. The board and form updates are all HTMX; what's left to wire by
-// hand is the interval lead word ("Every N weeks" vs "In N weeks"), the long-press
+// hand is the "Repeats" tick box (it gates the cadence controls), the long-press
 // edit dialog (a gesture HTMX has no trigger for), and the push notification
 // toggle, which HTMX can't express because it has to talk to the browser's
 // PushManager before it has anything to send the server.
 (function () {
   "use strict";
 
-  // Both the add form and the edit dialog carry an interval row, so this is
-  // per-form rather than by id.
-  function syncLead() {
-    document.querySelectorAll("form").forEach((form) => {
-      const lead = form.querySelector(".interval-lead");
-      const kind = form.querySelector('input[name="kind"]:checked');
-      if (lead && kind) lead.textContent = kind.value === "oneshot" ? "In" : "Every";
-    });
+  // The tick box is the only control for `kind`, so it drives two things: the
+  // hidden field that actually goes on the wire, and the enabled state of the
+  // cadence controls. Disabling them isn't only cosmetic — a disabled control is
+  // left out of the submission, which is exactly what a one-off should send.
+  function syncRepeat(form) {
+    if (!form) return;
+    const box = form.querySelector(".repeat-check");
+    const controls = form.querySelector(".repeat-controls");
+    if (!box || !controls) return;
+    controls.querySelectorAll("input, select").forEach((el) => { el.disabled = !box.checked; });
+    controls.classList.toggle("is-off", !box.checked);
+    if (form.elements.kind) form.elements.kind.value = box.checked ? "recurring" : "oneshot";
+  }
+
+  function syncRepeats() {
+    document.querySelectorAll("form").forEach(syncRepeat);
   }
 
   document.addEventListener("change", (e) => {
-    if (e.target && e.target.name === "kind") syncLead();
+    if (e.target && e.target.classList && e.target.classList.contains("repeat-check")) {
+      syncRepeat(e.target.form);
+    }
+  });
+
+  // form.reset() after a successful add restores the tick box but not the
+  // disabled flags it drives, which would leave the two disagreeing. The event
+  // fires *before* the reset lands, hence the deferral.
+  document.addEventListener("reset", (e) => {
+    const form = e.target;
+    setTimeout(() => syncRepeat(form), 0);
   });
 
   // --- long-press to edit -----------------------------------------------------
@@ -55,9 +73,10 @@
     form.elements.interval_n.value = d.n || "1";
     form.elements.interval_unit.value = d.unit || "week";
     form.elements.due_date.value = d.due || "";
-    const kind = form.querySelector('input[name="kind"][value="' + (d.kind || "recurring") + '"]');
-    if (kind) kind.checked = true;
-    syncLead();
+    // A one-off keeps whatever cadence it was last given, greyed out — so
+    // re-ticking the box restores it rather than starting from a default.
+    form.querySelector(".repeat-check").checked = d.kind !== "oneshot";
+    syncRepeat(form);
     setEditError("");
     dlg.showModal();
   }
@@ -248,10 +267,10 @@
   }
 
   // Run once on load, and again after any HTMX swap re-renders the board/form.
-  window.addEventListener("load", syncLead);
+  window.addEventListener("load", syncRepeats);
   window.addEventListener("load", syncBadge);
   window.addEventListener("load", initEditor);
   window.addEventListener("load", initPush);
-  document.body.addEventListener("htmx:afterSwap", syncLead);
+  document.body.addEventListener("htmx:afterSwap", syncRepeats);
   document.body.addEventListener("htmx:afterSwap", syncBadge);
 })();

@@ -29,12 +29,11 @@ python -m naggy init-db -c config.toml
 python -m naggy serve   -c config.toml  # open http://localhost:8080/
 ```
 
-Add a reminder from the form at the bottom: give it a name, choose **Repeats** or
-**One-time**, and set the cadence ("every 2 weeks" / "in 11 weeks"). **First due**
-pins the day it should first show up if the cadence alone doesn't land where you
-want it; leave it blank to start one interval from today. Pending items appear at
-the top; tap one to mark it done, or **long-press** any reminder to edit its name,
-cadence, due date and notes.
+Add a reminder from the form between the two lists: give it a name and the day it's
+first due (today, unless you pick another), then tick **Repeats** and set a cadence
+if it should come round again — leave it unticked for a one-off. Pending items
+appear at the top; tap one to mark it done, or **long-press** any reminder to edit
+its name, date, cadence and notes.
 
 ## Commands
 

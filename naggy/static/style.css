@@ -146,7 +146,6 @@ section h2 {
 .add form { display: flex; flex-direction: column; gap: 14px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > span { font-size: 0.82rem; color: var(--muted); }
-.field-hint { font-size: 0.74rem; color: var(--muted); }
 
 input[type="text"], input[type="number"], input[type="date"], select {
   background: var(--surface);
@@ -158,29 +157,40 @@ input[type="text"], input[type="number"], input[type="date"], select {
 }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 
-.kind { display: flex; gap: 10px; border: 0; padding: 0; margin: 0; }
-.kind label {
-  flex: 1;
+/* "Repeats" tick box, and the cadence it gates. */
+.field.repeat { gap: 10px; }
+.repeat-toggle {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px;
+  gap: 10px;
+  padding: 11px 13px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
-  font-size: 0.92rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.repeat-toggle input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
-.field.interval {
-  flex-direction: row;
+.repeat-controls {
+  display: flex;
   align-items: center;
   gap: 10px;
+  padding-left: 13px;             /* sits under the tick box's label, as its detail */
 }
-.field.interval #interval-lead { color: var(--muted); font-size: 0.92rem; }
-.field.interval input[type="number"] { width: 84px; }
-.field.interval select { flex: 1; }
+.repeat-controls > span { color: var(--muted); font-size: 0.92rem; }
+.repeat-controls input[type="number"] { width: 84px; }
+.repeat-controls select { flex: 1; }
+/* Off, not gone: the cadence stays legible so re-ticking the box shows what it
+   will go back to. */
+.repeat-controls.is-off { opacity: 0.42; }
+.repeat-controls :disabled { cursor: not-allowed; }
 
 button.primary {
   background: var(--accent);
@@ -226,7 +236,7 @@ button.ghost:disabled { color: var(--muted); cursor: default; }
 .modal form { display: flex; flex-direction: column; gap: 14px; }
 /* Inputs inside the dialog sit on --surface too, so lift them a shade to keep an edge. */
 .modal input[type="text"], .modal input[type="number"],
-.modal input[type="date"], .modal select, .modal .kind label { background: var(--surface-2); }
+.modal input[type="date"], .modal select, .modal .repeat-toggle { background: var(--surface-2); }
 
 .modal-actions { display: flex; gap: 10px; }
 .modal-actions button { flex: 1; }

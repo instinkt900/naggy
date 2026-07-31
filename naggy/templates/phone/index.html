@@ -22,26 +22,31 @@
         <input type="text" name="title" placeholder="Clean bedsheets" required autocomplete="off">
       </label>
 
-      <fieldset class="kind">
-        <label><input type="radio" name="kind" value="recurring" checked> Repeats</label>
-        <label><input type="radio" name="kind" value="oneshot"> One-time</label>
-      </fieldset>
-
-      <div class="field interval">
-        <span class="interval-lead">Every</span>
-        <input type="number" name="interval_n" value="2" min="1" inputmode="numeric" required>
-        <select name="interval_unit">
-          {% for u in units %}
-            <option value="{{ u }}" {% if u == 'week' %}selected{% endif %}>{{ u }}(s)</option>
-          {% endfor %}
-        </select>
-      </div>
-
       <label class="field">
-        <span>First due (optional)</span>
-        <input type="date" name="start_date">
-        <small class="field-hint">The day it should first show up. Leave blank to start one interval from today.</small>
+        <span>First due</span>
+        <input type="date" name="start_date" value="{{ today }}" required>
       </label>
+
+      {# The tick box carries no name of its own: phone.js mirrors it into the
+         hidden `kind` and disables the cadence controls when it's off, and a
+         disabled control isn't submitted — so an unticked box sends no interval
+         at all rather than a stale one the server would have to ignore. #}
+      <div class="field repeat">
+        <input type="hidden" name="kind" value="recurring">
+        <label class="repeat-toggle">
+          <input type="checkbox" class="repeat-check" checked>
+          <span>Repeats</span>
+        </label>
+        <div class="repeat-controls">
+          <span>every</span>
+          <input type="number" name="interval_n" value="2" min="1" inputmode="numeric" required>
+          <select name="interval_unit">
+            {% for u in units %}
+              <option value="{{ u }}" {% if u == 'week' %}selected{% endif %}>{{ u }}(s)</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
 
       <label class="field">
         <span>Notes (optional)</span>
@@ -72,25 +77,27 @@
       <input type="text" name="title" required autocomplete="off">
     </label>
 
-    <fieldset class="kind">
-      <label><input type="radio" name="kind" value="recurring"> Repeats</label>
-      <label><input type="radio" name="kind" value="oneshot"> One-time</label>
-    </fieldset>
-
-    <div class="field interval">
-      <span class="interval-lead">Every</span>
-      <input type="number" name="interval_n" min="1" inputmode="numeric" required>
-      <select name="interval_unit">
-        {% for u in units %}
-          <option value="{{ u }}">{{ u }}(s)</option>
-        {% endfor %}
-      </select>
-    </div>
-
     <label class="field">
       <span>Next due</span>
       <input type="date" name="due_date" required>
     </label>
+
+    <div class="field repeat">
+      <input type="hidden" name="kind" value="recurring">
+      <label class="repeat-toggle">
+        <input type="checkbox" class="repeat-check">
+        <span>Repeats</span>
+      </label>
+      <div class="repeat-controls">
+        <span>every</span>
+        <input type="number" name="interval_n" min="1" inputmode="numeric" required>
+        <select name="interval_unit">
+          {% for u in units %}
+            <option value="{{ u }}">{{ u }}(s)</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
 
     <label class="field">
       <span>Notes (optional)</span>
