@@ -34,7 +34,20 @@ body {
 .app-header h1 { margin: 0; font-size: 1.7rem; letter-spacing: -0.02em; }
 .app-header .tagline { margin: 2px 0 0; color: var(--muted); font-size: 0.9rem; }
 
-main { padding: 8px 14px 40px; }
+/* The add form sits *between* the two lists, but the whole board — both lists —
+   is one HTMX swap target, so the form can't live inside it in the markup: every
+   completion would re-render it and throw away whatever was half-typed. Instead
+   `display: contents` dissolves the board wrapper so its two sections become
+   flex items of `main` alongside the form, and `order` interleaves them. Every
+   direct child needs an explicit order, since the default of 0 sorts before any
+   of these. */
+main { padding: 8px 14px 40px; display: flex; flex-direction: column; }
+#board { display: contents; }
+.pending  { order: 1; }
+.add      { order: 2; }
+.upcoming { order: 3; }
+.hint     { order: 4; }
+.notify   { order: 5; }
 
 section { margin-top: 22px; }
 section h2 {

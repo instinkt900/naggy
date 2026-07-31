@@ -90,6 +90,12 @@ config.example.toml   the only tracked config; real config.toml is gitignored
   or a JSON one, whichever the `Content-Type` says. Every field is optional:
   `_clean_updates` in `web.py` validates and coerces only the keys present, so an
   absent field means "leave it alone" rather than "blank it".
+- The add form sits **between** the pending and upcoming lists, but stays outside
+  the swapped fragment: `#board` is `display: contents` so its two sections become
+  flex items of `main` and CSS `order` interleaves the form between them. Moving
+  the form into `partials/board.html` instead would look identical and then throw
+  away half-typed input on every completion — don't. Any new direct child of
+  `main` needs an explicit `order` (the default 0 sorts before all of them).
 - The edit dialog is **one** `<dialog>` in `phone/index.html`, outside `#board` so a
   swap can't yank it away mid-edit; a long press fills it from the pressed card's
   `data-*` attributes (no round trip) and `phone.js` fires the PATCH through
