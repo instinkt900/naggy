@@ -9,7 +9,8 @@ A small, self-contained phone-first reminder app for household chores. A reminde
 either **repeats** on a cadence ("clean bedsheets" every 2 weeks) or fires **once**
 ("harvest carrots" in 11 weeks). Expired reminders surface under **Pending
 actions**; tapping one confirms and "addresses" it — a recurring reminder resets
-its timer, a one-off is archived.
+its timer, a one-off is archived. **Long-pressing** any card opens a dialog that
+edits every field, the due date included.
 
 Modelled closely on the sibling app *Sugar Daddy* (`~/Development/sugardaddy`) —
 reuse its idioms.
@@ -31,8 +32,8 @@ naggy/
   web.py         FastAPI app factory (create_app); all routes as closures; tz helpers
   db.py          SQLite schema + Database wrapper (short-lived connections)
   models.py      dataclasses: Reminder, Completion, PushSubscription
-  schedule.py    PURE maths: next_due, start_of_day, days_until, board,
-                 due_for_notification, notify_time
+  schedule.py    PURE maths: next_due, start_of_day, due_from_date, days_until,
+                 board, due_for_notification, notify_time
   notify.py      Web Push: VAPID keys, pywebpush sending, the notify pass
   config.py      TOML loader; dataclasses; _known() rejects unknown keys; secrets from env only
   constants.py   KINDS, INTERVAL_UNITS, humanize_days
@@ -57,6 +58,15 @@ config.example.toml   the only tracked config; real config.toml is gitignored
   and `active`. Recurring: `interval_n` + `interval_unit` (`day|week|month|year`);
   on completion `due_at = schedule.next_due(now, n, unit, tz)`, stays active.
   One-shot: `active` set to 0 on completion (archived; completion history kept).
+- A cadence fixes how *often* a chore comes round but not which day it lands on, so
+  creation takes an optional **`start_date`** (`YYYY-MM-DD` from the form's date
+  picker) that pins the first `due_at` via `schedule.due_from_date`; blank keeps the
+  old behaviour of one interval from today. It anchors **only the first cycle** —
+  later ones are still measured from when the chore is actually addressed. Editing
+  a reminder's date is the same conversion (`due_date` on the PATCH).
+- A one-shot's interval is only a way of *typing* its due date, so it isn't shown
+  back: `_interval_label` reads `"one-time"` regardless of the stored cadence, which
+  is why the stored `interval_n`/`interval_unit` on a one-shot can be ignored.
 - **Keep `schedule.py` pure** (no I/O, no wall clock, no config — tz is passed in).
   New deterministic maths goes there and gets covered in `tests/`. All four units
   are calendar hops on the local date (which is also why day/week survive DST);
@@ -76,6 +86,15 @@ config.example.toml   the only tracked config; real config.toml is gitignored
   `POST /api/push/unsubscribe`, `POST /api/push/test`
 - HTMX form posts return the re-rendered `partials/board.html` fragment (swap
   target `#board`); the same endpoints answer JSON when `HX-Request` is absent.
+- `PATCH` takes a form body (what the edit dialog sends — htmx form-encodes PATCH)
+  or a JSON one, whichever the `Content-Type` says. Every field is optional:
+  `_clean_updates` in `web.py` validates and coerces only the keys present, so an
+  absent field means "leave it alone" rather than "blank it".
+- The edit dialog is **one** `<dialog>` in `phone/index.html`, outside `#board` so a
+  swap can't yank it away mid-edit; a long press fills it from the pressed card's
+  `data-*` attributes (no round trip) and `phone.js` fires the PATCH through
+  `htmx.ajax`. It can't use `hx-patch`: htmx bakes the URL in when it processes the
+  element, and the reminder id isn't known until a card is pressed.
 - `sw.js` is **network-first**, so code/template/static changes roll out on reload.
 
 ## Commands

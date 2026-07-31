@@ -65,6 +65,20 @@ def start_of_day_on(day: date, tz: ZoneInfo) -> int:
     return int(datetime(day.year, day.month, day.day, tzinfo=tz).timestamp())
 
 
+def due_from_date(day: str, tz: ZoneInfo) -> int:
+    """Turn a `YYYY-MM-DD` string (what `<input type="date">` submits) into a due moment.
+
+    The one conversion the UI needs that `next_due` can't do: pinning a reminder to
+    a day the user picked rather than one derived from a cadence. It lands on the
+    same day grid as everything else — local midnight — so a chore started on a
+    chosen date turns pending at the start of that day.
+
+    Raises ValueError on anything that isn't an ISO date, which the web layer turns
+    into a 400.
+    """
+    return start_of_day_on(date.fromisoformat(day), tz)
+
+
 def days_until(due_at: int, now: int, tz: ZoneInfo) -> int:
     """Whole local days from today's date to the due date.
 

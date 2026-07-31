@@ -9,6 +9,7 @@
 
 <main>
   {% include "partials/board.html" %}
+  <p class="hint">Long-press a reminder to edit it.</p>
 
   <section class="add">
     <h2>Add a reminder</h2>
@@ -27,7 +28,7 @@
       </fieldset>
 
       <div class="field interval">
-        <span id="interval-lead">Every</span>
+        <span class="interval-lead">Every</span>
         <input type="number" name="interval_n" value="2" min="1" inputmode="numeric" required>
         <select name="interval_unit">
           {% for u in units %}
@@ -35,6 +36,12 @@
           {% endfor %}
         </select>
       </div>
+
+      <label class="field">
+        <span>First due (optional)</span>
+        <input type="date" name="start_date">
+        <small class="field-hint">The day it should first show up. Leave blank to start one interval from today.</small>
+      </label>
 
       <label class="field">
         <span>Notes (optional)</span>
@@ -51,6 +58,53 @@
     <p class="notify-hint" id="notify-hint">Checking whether this device can be nagged…</p>
   </section>
 </main>
+
+{# Opened by a long press on any card (see phone.js), which fills it from the
+   card's data-* attributes — one dialog for the whole board rather than one per
+   reminder, and it lives outside #board so an HTMX swap can't yank it away
+   mid-edit. The PATCH is issued from phone.js: hx-patch would bake the URL in at
+   load time, and the id isn't known until a card is pressed. #}
+<dialog id="edit-modal" class="modal">
+  <h2>Edit reminder</h2>
+  <form id="edit-form">
+    <label class="field">
+      <span>What needs doing?</span>
+      <input type="text" name="title" required autocomplete="off">
+    </label>
+
+    <fieldset class="kind">
+      <label><input type="radio" name="kind" value="recurring"> Repeats</label>
+      <label><input type="radio" name="kind" value="oneshot"> One-time</label>
+    </fieldset>
+
+    <div class="field interval">
+      <span class="interval-lead">Every</span>
+      <input type="number" name="interval_n" min="1" inputmode="numeric" required>
+      <select name="interval_unit">
+        {% for u in units %}
+          <option value="{{ u }}">{{ u }}(s)</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <label class="field">
+      <span>Next due</span>
+      <input type="date" name="due_date" required>
+    </label>
+
+    <label class="field">
+      <span>Notes (optional)</span>
+      <input type="text" name="notes" autocomplete="off">
+    </label>
+
+    <p class="modal-error" id="edit-error"></p>
+
+    <div class="modal-actions">
+      <button type="button" class="ghost" data-close-modal>Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
 {% endblock %}
 
 {% block scripts %}

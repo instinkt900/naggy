@@ -30,8 +30,11 @@ python -m naggy serve   -c config.toml  # open http://localhost:8080/
 ```
 
 Add a reminder from the form at the bottom: give it a name, choose **Repeats** or
-**One-time**, and set the cadence ("every 2 weeks" / "in 11 weeks"). Pending items
-appear at the top; tap one to mark it done.
+**One-time**, and set the cadence ("every 2 weeks" / "in 11 weeks"). **First due**
+pins the day it should first show up if the cadence alone doesn't land where you
+want it; leave it blank to start one interval from today. Pending items appear at
+the top; tap one to mark it done, or **long-press** any reminder to edit its name,
+cadence, due date and notes.
 
 ## Commands
 
@@ -112,6 +115,12 @@ unit is `day | week | month | year`; on completion the timer resets via
 `schedule.next_due`. One-off reminders are archived (kept for history, hidden from
 lists) on completion.
 
+A cadence says how often a chore comes round, not which day it lands on, so the
+first `due_at` can be set outright from a picked date (`schedule.due_from_date`)
+instead of being derived from the interval. Only the first cycle is anchored that
+way — after that the interval is measured from when the chore is actually
+addressed, which is the point of "every 2 weeks".
+
 Naggy is **date-grained**: `due_at` is always the local midnight that opens the day
 a chore is due, and the interval arithmetic is done on local calendar dates rather
 than by adding seconds. All four units are therefore calendar hops — `month`/`year`
@@ -134,7 +143,9 @@ See `naggy/schedule.py` (pure, unit-tested) for the maths.
   `POST /api/push/unsubscribe`, `POST /api/push/test`
 
 HTMX form posts get back the re-rendered board fragment; the same endpoints answer
-JSON when the request isn't from HTMX.
+JSON when the request isn't from HTMX. `PATCH` accepts either a form body or JSON,
+and every field on it is optional — send `due_date` as `YYYY-MM-DD` to move a
+reminder to a particular day.
 
 ## Deployment (Docker)
 

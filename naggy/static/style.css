@@ -65,6 +65,11 @@ section h2 {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  /* Cards answer to a long press (edit); without this Android hijacks the same
+     gesture for text selection and its callout menu. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .card.is-pending {
   background: var(--pending-bg);
@@ -117,12 +122,20 @@ section h2 {
   font-size: 0.9rem;
 }
 
+.hint {
+  margin: 10px 6px 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: center;
+}
+
 /* --- add form --- */
 .add form { display: flex; flex-direction: column; gap: 14px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > span { font-size: 0.82rem; color: var(--muted); }
+.field-hint { font-size: 0.74rem; color: var(--muted); }
 
-input[type="text"], input[type="number"], select {
+input[type="text"], input[type="number"], input[type="date"], select {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -184,3 +197,26 @@ button.ghost:active { background: var(--surface-2); }
 button.ghost:disabled { color: var(--muted); cursor: default; }
 
 .notify-hint { margin: 8px 0 0; font-size: 0.8rem; color: var(--muted); }
+
+/* --- edit dialog --- */
+.modal {
+  width: min(92vw, 460px);
+  margin: auto;                      /* centres it in the viewport, top and bottom */
+  padding: 18px 16px 16px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.modal::backdrop { background: rgba(0, 0, 0, 0.6); }
+.modal h2 { margin: 0 0 14px; font-size: 1.05rem; color: var(--text); text-transform: none; letter-spacing: -0.01em; }
+.modal form { display: flex; flex-direction: column; gap: 14px; }
+/* Inputs inside the dialog sit on --surface too, so lift them a shade to keep an edge. */
+.modal input[type="text"], .modal input[type="number"],
+.modal input[type="date"], .modal select, .modal .kind label { background: var(--surface-2); }
+
+.modal-actions { display: flex; gap: 10px; }
+.modal-actions button { flex: 1; }
+
+.modal-error { margin: 0; color: var(--danger); font-size: 0.82rem; }
+.modal-error:empty { display: none; }

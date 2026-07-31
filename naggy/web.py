@@ -118,6 +118,11 @@ def create_app(config_path: str) -> FastAPI:
         # imply a precision the schedule doesn't have.
         return datetime.fromtimestamp(ts, tz).strftime("%a %d %b")
 
+    def local_date(ts: int) -> str:
+        # The machine-readable twin of `local_str`, in the one format
+        # `<input type="date">` will accept — it's what fills the edit modal.
+        return datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d")
+
     def reminder_json(r: Reminder, now: int) -> dict:
         due_in = r.due_at - now
         due_in_days = schedule.days_until(r.due_at, now, tz)
@@ -132,6 +137,7 @@ def create_app(config_path: str) -> FastAPI:
             "due_at": r.due_at,
             "due_at_ms": r.due_at * 1000,
             "due_local": local_str(r.due_at),
+            "due_date": local_date(r.due_at),
             # Both grains are published: `due_in_days` is what Naggy actually
             # schedules on and what the UI shows, `due_in_seconds` stays for any
             # consumer of the JSON seam that wants the raw distance.
@@ -227,6 +233,7 @@ def create_app(config_path: str) -> FastAPI:
         interval_n: int = Form(...),
         interval_unit: str = Form(...),
         notes: str = Form(""),
+        start_date: str = Form(""),
     ):
         title = title.strip()
         if not title:
@@ -239,12 +246,26 @@ def create_app(config_path: str) -> FastAPI:
             return JSONResponse({"error": "interval must be >= 1"}, status_code=400)
 
         now = now_epoch()
+        # A cadence says how *often* a chore comes round but not which day it lands
+        # on, so an optional start date pins the first one; without it the first due
+        # day is one interval from today, as it always was. Only the first cycle is
+        # anchored — later ones are measured from when the chore is actually
+        # addressed, which is the point of an "every 2 weeks" reminder.
+        start_date = start_date.strip()
+        try:
+            due_at = (
+                schedule.due_from_date(start_date, tz) if start_date
+                else schedule.next_due(now, interval_n, interval_unit, tz)
+            )
+        except ValueError:
+            return JSONResponse({"error": f"bad start date: {start_date}"}, status_code=400)
+
         r = Reminder(
             title=title,
             kind=kind,
             interval_n=interval_n,
             interval_unit=interval_unit,
-            due_at=schedule.next_due(now, interval_n, interval_unit, tz),
+            due_at=due_at,
             notes=notes.strip(),
             created_at=now,
         )
@@ -318,9 +339,30 @@ def create_app(config_path: str) -> FastAPI:
 
     @app.patch("/api/reminders/{reminder_id}")
     async def patch_reminder(request: Request, reminder_id: int):
-        body = await request.json()
-        ok = db.update_reminder(reminder_id, body)
-        return JSONResponse({"ok": ok}, status_code=200 if ok else 404)
+        """Edit an existing reminder — what the long-press modal saves.
+
+        Accepts either shape: the modal posts a form (htmx sends PATCH bodies
+        form-encoded), an API client posts JSON. Every field is optional, so a
+        caller can nudge one thing without restating the rest.
+        """
+        ctype = request.headers.get("content-type", "")
+        if ctype.startswith("application/json"):
+            raw = await request.json()
+        else:
+            raw = dict(await request.form())
+
+        fields, error = _clean_updates(raw, tz)
+        if error:
+            return JSONResponse({"error": error}, status_code=400)
+        if not fields:
+            return JSONResponse({"error": "nothing to update"}, status_code=400)
+        if not db.update_reminder(reminder_id, fields):
+            return JSONResponse({"error": "not found"}, status_code=404)
+
+        if wants_partial(request):
+            return board_partial(request)
+        now = now_epoch()
+        return reminder_json(db.get_reminder(reminder_id), now)
 
     @app.delete("/api/reminders/{reminder_id}")
     def delete_reminder(request: Request, reminder_id: int):
@@ -333,12 +375,84 @@ def create_app(config_path: str) -> FastAPI:
 
 
 def _interval_label(r: Reminder) -> str:
-    if not r.interval_n or not r.interval_unit:
+    # A one-shot's interval was only ever a way of *typing* its due date — and the
+    # date can now be picked outright or edited afterwards, so quoting the original
+    # cadence back ("once, in 11 weeks") would describe how the reminder was
+    # created rather than when it's due. The card already shows the date itself.
+    if r.kind == "oneshot" or not r.interval_n or not r.interval_unit:
         return "one-time"
     unit = r.interval_unit + ("" if r.interval_n == 1 else "s")
-    if r.kind == "oneshot":
-        return f"once, in {r.interval_n} {unit}"
     return f"every {r.interval_n} {unit}"
+
+
+def _clean_updates(raw: dict, tz: ZoneInfo) -> tuple[dict, str | None]:
+    """Normalise a partial reminder update into columns `db.update_reminder` takes.
+
+    Only keys actually present are returned, so an absent field means "leave it
+    alone" rather than "blank it". Values arrive as strings from a form and as
+    real types from JSON, hence the coercions. Returns `(fields, error)`; a
+    non-None error is a 400 and nothing is written.
+    """
+    out: dict = {}
+
+    if "title" in raw:
+        title = str(raw["title"]).strip()
+        if not title:
+            return {}, "title is required"
+        out["title"] = title
+
+    if "notes" in raw:
+        out["notes"] = str(raw["notes"]).strip()
+
+    if "kind" in raw:
+        kind = str(raw["kind"])
+        if kind not in KINDS:
+            return {}, f"bad kind: {kind}"
+        out["kind"] = kind
+
+    if "interval_unit" in raw:
+        unit = str(raw["interval_unit"])
+        if unit not in INTERVAL_UNITS:
+            return {}, f"bad interval_unit: {unit}"
+        out["interval_unit"] = unit
+
+    if "interval_n" in raw:
+        try:
+            n = int(raw["interval_n"])
+        except (TypeError, ValueError):
+            return {}, "interval must be a whole number"
+        if n < 1:
+            return {}, "interval must be >= 1"
+        out["interval_n"] = n
+
+    # `due_date` is the grain the UI works in (a day the user picked); `due_at`
+    # stays accepted for callers that already speak epoch seconds.
+    if raw.get("due_date"):
+        try:
+            out["due_at"] = schedule.due_from_date(str(raw["due_date"]), tz)
+        except ValueError:
+            return {}, f"bad date: {raw['due_date']}"
+    elif raw.get("due_at") is not None:
+        try:
+            out["due_at"] = int(raw["due_at"])
+        except (TypeError, ValueError):
+            return {}, "due_at must be epoch seconds"
+
+    if "active" in raw:
+        out["active"] = _truthy(raw["active"])
+
+    return out, None
+
+
+def _truthy(value: object) -> bool:
+    """Form checkboxes and JSON booleans, read the same way.
+
+    A form can only ever send strings, so `"0"`/`"false"` have to be spelled out —
+    `bool("false")` is True, which would make un-archiving impossible.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() not in ("", "0", "false", "no", "off")
+    return bool(value)
 
 
 def run_serve(config_path: str) -> int:

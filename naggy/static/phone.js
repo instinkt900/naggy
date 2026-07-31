@@ -1,21 +1,138 @@
 // Phone UI glue. The board and form updates are all HTMX; what's left to wire by
-// hand is the interval lead word ("Every N weeks" vs "In N weeks") and the push
-// notification toggle, which HTMX can't express because it has to talk to the
-// browser's PushManager before it has anything to send the server.
+// hand is the interval lead word ("Every N weeks" vs "In N weeks"), the long-press
+// edit dialog (a gesture HTMX has no trigger for), and the push notification
+// toggle, which HTMX can't express because it has to talk to the browser's
+// PushManager before it has anything to send the server.
 (function () {
   "use strict";
 
+  // Both the add form and the edit dialog carry an interval row, so this is
+  // per-form rather than by id.
   function syncLead() {
-    const form = document.getElementById("add-form");
-    if (!form) return;
-    const lead = document.getElementById("interval-lead");
-    const kind = form.querySelector('input[name="kind"]:checked');
-    if (lead && kind) lead.textContent = kind.value === "oneshot" ? "In" : "Every";
+    document.querySelectorAll("form").forEach((form) => {
+      const lead = form.querySelector(".interval-lead");
+      const kind = form.querySelector('input[name="kind"]:checked');
+      if (lead && kind) lead.textContent = kind.value === "oneshot" ? "In" : "Every";
+    });
   }
 
   document.addEventListener("change", (e) => {
     if (e.target && e.target.name === "kind") syncLead();
   });
+
+  // --- long-press to edit -----------------------------------------------------
+
+  const LONG_PRESS_MS = 500;
+  const MOVE_TOLERANCE = 12;   // px of finger drift still counted as a press, not a scroll
+
+  let pressTimer = null;
+  let pressOrigin = null;
+  let suppressClick = false;
+
+  function cancelPress() {
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = null;
+    pressOrigin = null;
+  }
+
+  const modal = () => document.getElementById("edit-modal");
+  const editForm = () => document.getElementById("edit-form");
+
+  function setEditError(message) {
+    const p = document.getElementById("edit-error");
+    if (p) p.textContent = message || "";
+  }
+
+  // Fill the dialog from the card's own data-* attributes and show it.
+  function openEditor(card) {
+    const dlg = modal();
+    const form = editForm();
+    if (!dlg || !form) return;
+    const d = card.dataset;
+    form.dataset.id = d.id;
+    form.elements.title.value = d.title || "";
+    form.elements.notes.value = d.notes || "";
+    form.elements.interval_n.value = d.n || "1";
+    form.elements.interval_unit.value = d.unit || "week";
+    form.elements.due_date.value = d.due || "";
+    const kind = form.querySelector('input[name="kind"][value="' + (d.kind || "recurring") + '"]');
+    if (kind) kind.checked = true;
+    syncLead();
+    setEditError("");
+    dlg.showModal();
+  }
+
+  document.addEventListener("pointerdown", (e) => {
+    // A fresh press: whatever the last one armed is spent, even if its click
+    // never arrived (a cancelled pointer sequence produces none).
+    suppressClick = false;
+    const card = e.target.closest && e.target.closest(".card[data-id]");
+    // The delete button is its own gesture; don't shadow it with an edit.
+    if (!card || e.target.closest(".card-del")) return;
+    pressOrigin = { x: e.clientX, y: e.clientY };
+    pressTimer = setTimeout(() => {
+      cancelPress();
+      // The release still fires a click; swallow it, or a long press on a pending
+      // card would also tick the chore off.
+      suppressClick = true;
+      if (navigator.vibrate) navigator.vibrate(15);
+      openEditor(card);
+    }, LONG_PRESS_MS);
+  });
+
+  document.addEventListener("pointermove", (e) => {
+    if (!pressOrigin) return;
+    if (Math.abs(e.clientX - pressOrigin.x) > MOVE_TOLERANCE ||
+        Math.abs(e.clientY - pressOrigin.y) > MOVE_TOLERANCE) {
+      cancelPress();   // they're scrolling the board, not holding a card
+    }
+  });
+  ["pointerup", "pointercancel", "scroll"].forEach((type) =>
+    document.addEventListener(type, cancelPress, true));
+
+  // Capture phase, so HTMX's own handler on the card button never sees the click.
+  document.addEventListener("click", (e) => {
+    if (!suppressClick) return;
+    suppressClick = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
+  // Android pops a text-selection callout on a long press otherwise.
+  document.addEventListener("contextmenu", (e) => {
+    if (e.target.closest && e.target.closest(".card[data-id]")) e.preventDefault();
+  });
+
+  function initEditor() {
+    const dlg = modal();
+    const form = editForm();
+    if (!dlg || !form) return;
+
+    form.addEventListener("submit", (e) => {
+      // Native validation has already passed by the time submit fires. The
+      // request goes through htmx.ajax rather than hx-patch because htmx reads
+      // the URL when it processes the element, and the reminder id isn't known
+      // until a card is pressed — so the response still swaps #board exactly like
+      // every other mutation.
+      e.preventDefault();
+      setEditError("");
+      htmx.ajax("PATCH", "/api/reminders/" + form.dataset.id, {
+        source: form,
+        target: "#board",
+        swap: "outerHTML",
+      });
+    });
+
+    form.addEventListener("htmx:afterRequest", (e) => {
+      if (e.detail.successful) dlg.close();
+      else setEditError("Couldn't save that — check the fields and try again.");
+    });
+
+    dlg.addEventListener("click", (e) => {
+      // Clicking the backdrop targets the dialog itself.
+      if (e.target === dlg || e.target.hasAttribute("data-close-modal")) dlg.close();
+    });
+  }
 
   // --- home-screen icon badge -------------------------------------------------
 
@@ -133,6 +250,7 @@
   // Run once on load, and again after any HTMX swap re-renders the board/form.
   window.addEventListener("load", syncLead);
   window.addEventListener("load", syncBadge);
+  window.addEventListener("load", initEditor);
   window.addEventListener("load", initPush);
   document.body.addEventListener("htmx:afterSwap", syncLead);
   document.body.addEventListener("htmx:afterSwap", syncBadge);

@@ -125,6 +125,40 @@ def test_start_of_day_rounds_down():
     assert schedule.start_of_day(_epoch(2026, 7, 28), MELB) == _epoch(2026, 7, 28)
 
 
+def test_due_from_date_lands_on_local_midnight():
+    assert schedule.due_from_date("2026-08-14", MELB) == _epoch(2026, 8, 14)
+    assert _parts(schedule.due_from_date("2026-08-14", MELB)) == (2026, 8, 14, 0, 0)
+
+
+def test_due_from_date_is_relative_to_the_configured_zone():
+    # The same picked date is a different instant in each zone — the point of
+    # passing tz in rather than reading a global.
+    assert schedule.due_from_date("2026-08-14", MELB) != schedule.due_from_date("2026-08-14", UTC)
+
+
+def test_due_from_date_survives_a_dst_change():
+    # Melbourne enters DST at 02:00 on 4 Oct 2026; midnight on the 4th is still
+    # midnight, and the day before it is 24 hours earlier, not 23.
+    assert _parts(schedule.due_from_date("2026-10-04", MELB)) == (2026, 10, 4, 0, 0)
+
+
+def test_due_from_date_rejects_junk():
+    for bad in ("", "14/08/2026", "2026-13-01", "tomorrow"):
+        try:
+            schedule.due_from_date(bad, MELB)
+            assert False, f"expected ValueError for {bad!r}"
+        except ValueError:
+            pass
+
+
+def test_a_picked_start_date_turns_pending_at_its_midnight():
+    """A chore started on a chosen day behaves exactly like a cadence-derived one:
+    quiet until that date, pending from its first second."""
+    r = _r(schedule.due_from_date("2026-08-14", MELB))
+    assert not r.is_pending(_epoch(2026, 8, 13, 23, 59))
+    assert r.is_pending(_epoch(2026, 8, 14, 0, 0))
+
+
 def test_days_until_counts_dates_not_elapsed_time():
     # 23:00 tonight to 00:00 tomorrow is one hour, but it is still a day away.
     now = _epoch(2026, 7, 28, 23, 0)
