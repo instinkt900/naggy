@@ -189,20 +189,21 @@ def test_badge_count_defaults_to_the_batch_but_can_be_overridden():
     assert notify.build_payload(rems, NOW, MELB, badge_count=5)["badge_count"] == 5
 
 
-def test_single_payload_uses_the_reminder_title():
+def test_single_payload_titles_the_timing_and_bodies_the_chore():
+    # The chore name goes in the body, where it wraps: Android truncates the title.
     due = _epoch(2026, 7, 26)
     p = notify.build_payload([_r("Clean bedsheets", due)], _epoch(2026, 7, 28, 9, 0), MELB)
-    assert p["title"] == "Clean bedsheets", p
-    assert p["body"] == "2 days overdue", p
+    assert p["title"] == "2 days overdue", p
+    assert p["body"] == "Clean bedsheets", p
     assert p["tag"] == "naggy-pending", p
 
 
-def test_single_payload_body_is_day_grained():
+def test_single_payload_title_is_day_grained():
     # Pushed at 08:00 on the morning a chore falls due (midnight): it reads as due
     # today, not as "8 hours overdue".
     due = _epoch(2026, 7, 28)
     p = notify.build_payload([_r("Clean bedsheets", due)], _epoch(2026, 7, 28, 8, 0), MELB)
-    assert p["body"] == "due today", p
+    assert p["title"] == "due today", p
 
 
 def test_single_payload_appends_notes():

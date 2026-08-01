@@ -188,6 +188,11 @@ def build_payload(
     The `tag` makes a later pass replace the previous notification rather than
     stack on top of it.
 
+    For a single chore the *timing* is the title and the chore is the body, not the
+    other way round: Android gives the title one line and elides the rest, so a
+    chore name long enough to matter is exactly the part that gets cut. "due today"
+    always fits, and the body wraps.
+
     A `repost` — the same outstanding chores pushed again under
     `repeat_while_pending` — is always silent and never re-alerts. The first
     notification of a cycle gets your attention; after that it should just sit
@@ -195,8 +200,8 @@ def build_payload(
     """
     if len(reminders) == 1:
         r = reminders[0]
-        title = r.title
-        body = humanize_days(schedule.days_until(r.due_at, now, tz))
+        title = humanize_days(schedule.days_until(r.due_at, now, tz))
+        body = r.title
         if r.notes:
             body = f"{body} · {r.notes}"
     else:
