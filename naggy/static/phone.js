@@ -159,8 +159,12 @@
   // clears the badge immediately rather than waiting for the next push.
   function syncBadge() {
     const board = document.getElementById("board");
-    if (!board || !navigator.setAppBadge) return;
+    if (!board) return;
     const n = parseInt(board.dataset.pending || "0", 10) || 0;
+    if (n === 0 && navigator.serviceWorker && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({ action: "dismiss-pending" });
+    }
+    if (!navigator.setAppBadge) return;
     const p = n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge();
     if (p && p.catch) p.catch(() => {});
   }

@@ -88,6 +88,17 @@ function setBadge(count) {
   }
 }
 
+self.addEventListener("message", (e) => {
+  if (e.data && e.data.action === "dismiss-pending") {
+    e.waitUntil(
+      self.registration.getNotifications({ tag: "naggy-pending" }).then((notifs) => {
+        notifs.forEach((n) => n.close());
+      })
+    );
+    setBadge(0);
+  }
+});
+
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || "/";
