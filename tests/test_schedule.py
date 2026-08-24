@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from naggy import schedule
-from naggy.constants import humanize_days
+from naggy.constants import humanize_ago, humanize_days
 from naggy.models import Reminder
 
 UTC = ZoneInfo("UTC")
@@ -176,11 +176,30 @@ def test_days_until_is_timezone_sensitive():
     assert schedule.days_until(due, now, MELB) == 0
 
 
+def test_days_since_counts_dates_not_elapsed_time():
+    # The back-looking twin: done late last night and checked early this morning is
+    # still "yesterday", because it's a date subtraction.
+    now = _epoch(2026, 7, 28, 23, 0)
+    assert schedule.days_since(_epoch(2026, 7, 28), now, MELB) == 0
+    assert schedule.days_since(_epoch(2026, 7, 27), now, MELB) == 1
+    assert schedule.days_since(_epoch(2026, 7, 14), now, MELB) == 14
+
+
+def test_days_since_is_timezone_sensitive():
+    # Mirror of the days_until case: the anchor's 16:00 UTC was already 02:00 on the
+    # 28th in Melbourne, so there it was done "today" while UTC still counts it a day
+    # ago.
+    anchor = _epoch(2026, 7, 27, 16, 0, tz=UTC)
+    now = _epoch(2026, 7, 28, 1, 0, tz=UTC)
+    assert schedule.days_since(anchor, now, UTC) == 1
+    assert schedule.days_since(anchor, now, MELB) == 0
+
+
 # --- the board ----------------------------------------------------------------
 
 
-def _r(due_at, active=True):
-    return Reminder(title="x", due_at=due_at, active=active)
+def _r(due_at, active=True, kind="recurring"):
+    return Reminder(title="x", due_at=due_at, active=active, kind=kind)
 
 
 def test_board_splits_and_sorts():
@@ -214,6 +233,51 @@ def test_reminder_turns_pending_at_midnight():
     assert r.is_pending(_epoch(2026, 7, 28, 9, 0))
 
 
+# --- open-ended ---------------------------------------------------------------
+
+
+def test_open_reminder_never_pends():
+    # Its `due_at` is the day it was last done, not a deadline: five months past
+    # that it is still "open", never "pending". This is also what keeps open
+    # reminders out of the push pass for free (due_for_notification only looks at
+    # is_pending).
+    r = _r(_epoch(2026, 1, 1), kind="open")
+    now = _epoch(2026, 7, 28)
+    assert not r.is_pending(now)
+    assert r.status_at(now) == "open"
+    assert r.status_at(_epoch(2026, 12, 31)) == "open"
+
+
+def test_open_reminder_done_today_reads_zero():
+    # Freshly addressed (this morning, say): age is zero days, not a fraction.
+    r = _r(_epoch(2026, 7, 28), kind="open")
+    assert schedule.days_since(r.due_at, _epoch(2026, 7, 28, 23, 59), MELB) == 0
+
+
+def test_board_sends_open_to_its_own_bucket():
+    now = _epoch(2026, 7, 28, 9, 0)    # Monday morning
+    rems = [
+        _r(_epoch(2026, 7, 18), kind="open"),   # done 10 days ago
+        _r(_epoch(2026, 5, 28), kind="open"),   # done 2 months ago — stalest
+        _r(_epoch(2026, 7, 8), kind="open"),    # done 3 weeks ago
+        _r(_epoch(2026, 7, 27)),                # recurring, pending (yesterday)
+        _r(_epoch(2026, 7, 30)),                # upcoming (Wednesday)
+        _r(_epoch(2026, 7, 26), active=False),  # archived -> excluded
+    ]
+    b = schedule.board(rems, now)
+    assert [r.due_at for r in b["pending"]] == [_epoch(2026, 7, 27)]
+    assert [r.due_at for r in b["upcoming"]] == [_epoch(2026, 7, 30)]
+    # Longest-ago first: the stalest chore is the one you most want to know about.
+    assert [r.due_at for r in b["open"]] == [
+        _epoch(2026, 5, 28),
+        _epoch(2026, 7, 8),
+        _epoch(2026, 7, 18),
+    ], b["open"]
+    # An open reminder's stored day can't leak into pending/upcoming even though it
+    # is "in the past".
+    assert all(r.kind == "recurring" for r in b["pending"] + b["upcoming"])
+
+
 # --- display phrasing ---------------------------------------------------------
 
 
@@ -237,6 +301,21 @@ def test_humanize_days_never_mentions_hours():
     for days in range(-400, 400):
         phrase = humanize_days(days)
         assert "hour" not in phrase and "minute" not in phrase, (days, phrase)
+
+
+def test_humanize_ago_counts_back():
+    assert humanize_ago(0) == "today"
+    assert humanize_ago(1) == "yesterday"
+    assert humanize_ago(3) == "3 days ago"
+    # A last-done date in the future can only come from a hand-typed edit; clamping
+    # to "today" beats inventing an "in 2 days" for something already done.
+    assert humanize_ago(-2) == "today"
+
+
+def test_humanize_ago_coarsens_long_ages():
+    assert humanize_ago(14) == "2 weeks ago"
+    assert humanize_ago(90) == "3 months ago"
+    assert humanize_ago(400) == "1 year ago"
 
 
 def _run_all():

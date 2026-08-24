@@ -7,8 +7,9 @@ Python enums, to keep the DB rows and JSON trivially portable).
 
 from __future__ import annotations
 
-# A reminder either repeats forever on a cadence or fires exactly once.
-KINDS = ("recurring", "oneshot")
+# A reminder repeats forever on a cadence, fires exactly once, or is open-ended:
+# it never falls due, it only records how long ago it was last done.
+KINDS = ("recurring", "oneshot", "open")
 
 # Interval units a cadence can be expressed in. All four are calendar-based — see
 # schedule.next_due, which works on local dates and clamps the day-of-month.
@@ -17,6 +18,22 @@ INTERVAL_UNITS = ("day", "week", "month", "year")
 # Whole days per fixed-length unit. month/year aren't here because they aren't a
 # fixed number of days; they're calendar hops.
 _UNIT_DAYS = {"day": 1, "week": 7}
+
+
+def humanize_ago(days: int) -> str:
+    """Render a whole-day age (today minus the last-done date) as a human phrase.
+
+    The back-looking twin of `humanize_days`, for open-ended reminders that have
+    no due date and can only be described as "last done N ago". Zero is "today",
+    one is "yesterday". A negative days — a last-done date in the future, which
+    only a hand-typed edit can produce — clamps to "today" rather than inventing
+    an "in N days" for something already done. Used only for display.
+    """
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "yesterday"
+    return f"{_coarse_days(days)} ago"
 
 
 def humanize_days(days: int) -> str:

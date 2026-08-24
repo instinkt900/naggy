@@ -1,3 +1,3 @@
-"""Naggy — a phone-first reminder app for recurring and one-off household chores."""
+"""Naggy — a phone-first reminder app for recurring, one-off and open-ended chores."""
 
-__version__ = "0.5.3"
+__version__ = "0.6.0"

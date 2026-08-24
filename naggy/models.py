@@ -13,10 +13,11 @@ from dataclasses import dataclass
 @dataclass
 class Reminder:
     title: str
-    kind: str = "recurring"            # 'recurring' | 'oneshot'
+    kind: str = "recurring"            # 'recurring' | 'oneshot' | 'open'
     interval_n: int | None = None       # cadence count, e.g. the 2 in "every 2 weeks"
     interval_unit: str | None = None    # 'day' | 'week' | 'month' | 'year'
     due_at: int = 0                     # epoch s at local midnight opening the day it's due
+                                        # (open reminders store the day last done there)
     notes: str = ""
     last_done_at: int | None = None     # epoch s of the last completion, if any
     created_at: int = 0
@@ -25,15 +26,22 @@ class Reminder:
     id: int | None = None
 
     def is_pending(self, now: int) -> bool:
-        """Pending == active and its due moment has arrived/passed.
+        """Pending == active, scheduled, and its due moment has arrived/passed.
 
         `due_at` is local midnight (see `schedule.next_due`), so in practice this
         flips over at the start of the day the chore is due — no timezone needed
         here, the day boundary is already baked into the stored timestamp.
+
+        Open-ended reminders never pend: their `due_at` is the day they were last
+        done, not a deadline, so the check can't apply to them at all. They are
+        excluded here rather than at every call site, which is also what keeps
+        them out of the push pass for free.
         """
-        return self.active and now >= self.due_at
+        return self.active and self.kind != "open" and now >= self.due_at
 
     def status_at(self, now: int) -> str:
+        if self.kind == "open":
+            return "open"
         return "pending" if self.is_pending(now) else "upcoming"
 
 

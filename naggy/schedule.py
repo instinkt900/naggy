@@ -92,6 +92,20 @@ def days_until(due_at: int, now: int, tz: ZoneInfo) -> int:
     return (due_day - today).days
 
 
+def days_since(anchor: int, now: int, tz: ZoneInfo) -> int:
+    """Whole local days from `anchor`'s date to today's date — how long ago it was.
+
+    The back-looking twin of `days_until` for open-ended reminders, whose only
+    date is the day they were last done, so it reads "2 weeks ago" for a chore
+    done fourteen local days back. Same *date* subtraction, so the wall clock is
+    irrelevant: a chore done Tuesday reads as one day old at any instant on
+    Wednesday.
+    """
+    anchor_day = datetime.fromtimestamp(anchor, tz).date()
+    today = datetime.fromtimestamp(now, tz).date()
+    return (today - anchor_day).days
+
+
 def _days_in_month(year: int, month: int) -> int:
     # First day of the next month minus one day = last day of this month.
     if month == 12:
@@ -102,21 +116,33 @@ def _days_in_month(year: int, month: int) -> int:
 
 
 def board(reminders: list[Reminder], now: int) -> dict[str, list[Reminder]]:
-    """Split active reminders into the two lists the UI shows.
+    """Split active reminders into the three lists the UI shows.
 
     `pending`: due moment reached — most overdue first (they need attention most).
     `upcoming`: not yet due — soonest first (what's coming next).
-    Inactive reminders (archived one-shots) are excluded from both.
+    `open`: open-ended, which never fall due — their `due_at` is the day they were
+    last done, so they're sorted longest-ago first: the stalest chore is the one
+    you most want to know about. They can't reach `pending` (see
+    `Reminder.is_pending`), so this is the only place the split special-cases
+    them.
+    Inactive reminders (archived one-shots) are excluded from all three.
     """
     pending: list[Reminder] = []
     upcoming: list[Reminder] = []
+    open_ended: list[Reminder] = []
     for r in reminders:
         if not r.active:
             continue
-        (pending if r.is_pending(now) else upcoming).append(r)
+        if r.kind == "open":
+            open_ended.append(r)
+        elif r.is_pending(now):
+            pending.append(r)
+        else:
+            upcoming.append(r)
     pending.sort(key=lambda r: r.due_at)          # most overdue (smallest due_at) first
     upcoming.sort(key=lambda r: r.due_at)          # soonest first
-    return {"pending": pending, "upcoming": upcoming}
+    open_ended.sort(key=lambda r: r.due_at)        # oldest last-done (smallest due_at) first
+    return {"pending": pending, "upcoming": upcoming, "open": open_ended}
 
 
 def notify_time(due_at: int, tz: ZoneInfo, hour: int, minute: int) -> int:

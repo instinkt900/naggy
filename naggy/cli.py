@@ -1,7 +1,8 @@
 """Naggy command-line entrypoint.
 
 Subcommands: serve (web app), init-db (create schema and exit), report (print
-what's pending/upcoming, text or JSON), notify (push for anything newly due),
+what's pending/upcoming/anytime, text or JSON), notify (push for anything newly
+due),
 vapid-keys (mint a push signing key). Imports are lazy per branch so a quick
 command doesn't drag in uvicorn/fastapi — or, for `notify`, the crypto stack.
 """
@@ -34,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     p_init = sub.add_parser("init-db", help="create the database schema and exit")
     p_init.add_argument("-c", "--config", required=True)
 
-    p_report = sub.add_parser("report", help="print pending and upcoming reminders")
+    p_report = sub.add_parser("report", help="print pending, upcoming and open-ended reminders")
     p_report.add_argument("-c", "--config", required=True)
     p_report.add_argument("--json", action="store_true", help="emit JSON instead of text")
 
@@ -137,7 +138,7 @@ def _report(config_path: str, *, as_json: bool) -> int:
 
     from naggy import schedule
     from naggy.config import load_config
-    from naggy.constants import humanize_days
+    from naggy.constants import humanize_ago, humanize_days
     from naggy.db import Database
 
     cfg = load_config(config_path)
@@ -148,9 +149,16 @@ def _report(config_path: str, *, as_json: bool) -> int:
     b = schedule.board(db.list_active(), now)
 
     def human(r):
+        # Open-ended reminders count back from the day they were last done
+        # instead of forward to a due date that never comes.
+        if r.kind == "open":
+            return f"last done {humanize_ago(schedule.days_since(r.due_at, now, tz))}"
         return humanize_days(schedule.days_until(r.due_at, now, tz))
 
     def row(r):
+        # Both grains are published, as in reminder_json: `due_in_days` forward
+        # to a due date, `age_days` back from it — open-ended rows live on the
+        # back-looking one.
         return {
             "id": r.id,
             "title": r.title,
@@ -158,6 +166,7 @@ def _report(config_path: str, *, as_json: bool) -> int:
             "due_at": r.due_at,
             "due_in_days": schedule.days_until(r.due_at, now, tz),
             "due_in_seconds": r.due_at - now,
+            "age_days": schedule.days_since(r.due_at, now, tz),
             "human": human(r),
         }
 
@@ -165,7 +174,8 @@ def _report(config_path: str, *, as_json: bool) -> int:
         print(json.dumps(
             {"now": now,
              "pending": [row(r) for r in b["pending"]],
-             "upcoming": [row(r) for r in b["upcoming"]]},
+             "upcoming": [row(r) for r in b["upcoming"]],
+             "open": [row(r) for r in b["open"]]},
             indent=2,
         ))
         return 0
@@ -179,5 +189,10 @@ def _report(config_path: str, *, as_json: bool) -> int:
     for r in b["upcoming"]:
         print(f"  • {r.title}  [{human(r)}]")
     if not b["upcoming"]:
+        print("  (none)")
+    print(f"\nAnytime ({len(b['open'])}):")
+    for r in b["open"]:
+        print(f"  • {r.title}  [{human(r)}]")
+    if not b["open"]:
         print("  (none)")
     return 0

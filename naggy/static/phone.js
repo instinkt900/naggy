@@ -1,41 +1,49 @@
 // Phone UI glue. The board and form updates are all HTMX; what's left to wire by
-// hand is the "Repeats" tick box (it gates the cadence controls), the long-press
+// hand is the kind picker (it gates the cadence controls and re-labels the date
+// field), the long-press
 // edit dialog (a gesture HTMX has no trigger for), and the push notification
 // toggle, which HTMX can't express because it has to talk to the browser's
 // PushManager before it has anything to send the server.
 (function () {
   "use strict";
 
-  // The tick box is the only control for `kind`, so it drives two things: the
-  // hidden field that actually goes on the wire, and the enabled state of the
-  // cadence controls. Disabling them isn't only cosmetic — a disabled control is
-  // left out of the submission, which is exactly what a one-off should send.
-  function syncRepeat(form) {
+  // The kind radios are the only control for `kind`, so they drive three things:
+  // the enabled state of the cadence controls, the date field's label, and that
+  // field's requiredness. Disabling the controls isn't only cosmetic — a disabled
+  // control is left out of the submission, which is exactly what a one-off or an
+  // open-ended reminder should send: no interval for the server to store or drift.
+  // Open-ended reminders have no due date at all, so the date becomes "the day it
+  // was last done" and may be left blank (the server then means "today").
+  function syncKind(form) {
     if (!form) return;
-    const box = form.querySelector(".repeat-check");
+    const checked = form.querySelector('input[name="kind"]:checked');
+    const kind = checked ? checked.value : "recurring";
+    const off = kind !== "recurring";
     const controls = form.querySelector(".repeat-controls");
-    if (!box || !controls) return;
-    controls.querySelectorAll("input, select").forEach((el) => { el.disabled = !box.checked; });
-    controls.classList.toggle("is-off", !box.checked);
-    if (form.elements.kind) form.elements.kind.value = box.checked ? "recurring" : "oneshot";
+    if (controls) {
+      controls.querySelectorAll("input, select").forEach((el) => { el.disabled = off; });
+      controls.classList.toggle("is-off", off);
+    }
+    const label = form.querySelector(".kind-date-label");
+    if (label) label.textContent = kind === "open" ? "Last done" : (label.dataset.label || "Next due");
+    const date = form.querySelector('input[type="date"]');
+    if (date) date.required = !off;
   }
 
-  function syncRepeats() {
-    document.querySelectorAll("form").forEach(syncRepeat);
+  function syncKinds() {
+    document.querySelectorAll("form").forEach(syncKind);
   }
 
   document.addEventListener("change", (e) => {
-    if (e.target && e.target.classList && e.target.classList.contains("repeat-check")) {
-      syncRepeat(e.target.form);
-    }
+    if (e.target && e.target.name === "kind" && e.target.form) syncKind(e.target.form);
   });
 
-  // form.reset() after a successful add restores the tick box but not the
-  // disabled flags it drives, which would leave the two disagreeing. The event
-  // fires *before* the reset lands, hence the deferral.
+  // form.reset() after a successful add restores the default-checked radio but
+  // not the disabled flags it drives, which would leave the two disagreeing. The
+  // event fires *before* the reset lands, hence the deferral.
   document.addEventListener("reset", (e) => {
     const form = e.target;
-    setTimeout(() => syncRepeat(form), 0);
+    setTimeout(() => syncKind(form), 0);
   });
 
   // --- long-press to edit -----------------------------------------------------
@@ -73,10 +81,13 @@
     form.elements.interval_n.value = d.n || "1";
     form.elements.interval_unit.value = d.unit || "week";
     form.elements.due_date.value = d.due || "";
-    // A one-off keeps whatever cadence it was last given, greyed out — so
-    // re-ticking the box restores it rather than starting from a default.
-    form.querySelector(".repeat-check").checked = d.kind !== "oneshot";
-    syncRepeat(form);
+    // A one-off or an open-ended reminder keeps whatever cadence it was last
+    // given, greyed out — so changing the kind back restores it rather than
+    // starting from a default.
+    const kind = d.kind || "recurring";
+    const radio = form.querySelector('input[name="kind"][value="' + kind + '"]');
+    if (radio) radio.checked = true;
+    syncKind(form);
     setEditError("");
     dlg.showModal();
   }
@@ -271,10 +282,10 @@
   }
 
   // Run once on load, and again after any HTMX swap re-renders the board/form.
-  window.addEventListener("load", syncRepeats);
+  window.addEventListener("load", syncKinds);
   window.addEventListener("load", syncBadge);
   window.addEventListener("load", initEditor);
   window.addEventListener("load", initPush);
-  document.body.addEventListener("htmx:afterSwap", syncRepeats);
+  document.body.addEventListener("htmx:afterSwap", syncKinds);
   document.body.addEventListener("htmx:afterSwap", syncBadge);
 })();

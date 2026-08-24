@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     title         TEXT    NOT NULL,
     notes         TEXT    NOT NULL DEFAULT '',
-    kind          TEXT    NOT NULL DEFAULT 'recurring',   -- 'recurring' | 'oneshot'
+    kind          TEXT    NOT NULL DEFAULT 'recurring',   -- 'recurring' | 'oneshot' | 'open'
     interval_n    INTEGER,                                 -- cadence count
     interval_unit TEXT,                                    -- day|week|month|year
     due_at        INTEGER NOT NULL,                         -- epoch s at local midnight; pending when now>=due_at
@@ -167,9 +167,10 @@ class Database:
             return int(cur.lastrowid)
 
     def complete_reminder(self, reminder_id: int, now: int, tz: ZoneInfo) -> Reminder | None:
-        """Address a reminder in one transaction: log the completion, then either
-        reset a recurring reminder's timer or archive a one-shot. Returns the
-        updated reminder (inactive if archived), or None if it doesn't exist."""
+        """Address a reminder in one transaction: log the completion, then reset a
+        recurring reminder's timer, move an open-ended one to "done today", or
+        archive a one-shot. Returns the updated reminder (inactive if archived),
+        or None if it doesn't exist."""
         with self.connect() as conn:
             row = conn.execute(
                 "SELECT * FROM reminders WHERE id = ?", (reminder_id,)
@@ -183,7 +184,17 @@ class Database:
                 (reminder_id, now, r.due_at),
             )
 
-            if r.kind == "recurring" and r.interval_n and r.interval_unit:
+            if r.kind == "open":
+                # No cadence to advance and nothing to archive: the "due" date is
+                # the day it was last done, so addressing it just moves that to
+                # today. Re-tapping a stale chore is always safe.
+                r.due_at = schedule.start_of_day(now, tz)
+                r.last_done_at = now
+                conn.execute(
+                    "UPDATE reminders SET due_at = ?, last_done_at = ? WHERE id = ?",
+                    (r.due_at, r.last_done_at, reminder_id),
+                )
+            elif r.kind == "recurring" and r.interval_n and r.interval_unit:
                 r.due_at = schedule.next_due(now, r.interval_n, r.interval_unit, tz)
                 r.last_done_at = now
                 conn.execute(

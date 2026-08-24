@@ -57,4 +57,34 @@
       <p class="empty">No reminders yet — add one below.</p>
     {% endif %}
   </section>
+
+  {# Open-ended reminders never fall due, so they get their own section: how
+     long ago each was last done, stalest first. It renders only when it has
+     cards, so an all-scheduled board looks exactly as it did before. #}
+  {% if board.open %}
+  <section class="anytime">
+    <h2>Anytime</h2>
+    <ul class="cards">
+      {% for r in board.open %}
+        <li class="card is-open"
+            data-id="{{ r.id }}" data-title="{{ r.title }}" data-notes="{{ r.notes }}"
+            data-kind="{{ r.kind }}" data-n="{{ r.interval_n or 1 }}"
+            data-unit="{{ r.interval_unit or 'week' }}" data-due="{{ r.due_date }}">
+          <button class="card-tap"
+                  hx-post="/api/reminders/{{ r.id }}/complete"
+                  hx-target="#board" hx-swap="outerHTML"
+                  hx-confirm="Mark “{{ r.title }}” done today?">
+            <span class="card-title">{{ r.title }}</span>
+            <span class="card-meta">last done {{ r.human }}</span>
+            {% if r.notes %}<span class="card-notes">{{ r.notes }}</span>{% endif %}
+          </button>
+          <button class="card-del" title="Delete"
+                  hx-delete="/api/reminders/{{ r.id }}"
+                  hx-target="#board" hx-swap="outerHTML"
+                  hx-confirm="Delete “{{ r.title }}” entirely?">✕</button>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
 </div>

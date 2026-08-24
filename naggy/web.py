@@ -29,7 +29,7 @@ from fastapi.templating import Jinja2Templates
 
 from naggy import __version__, notify, schedule
 from naggy.config import load_config
-from naggy.constants import INTERVAL_UNITS, KINDS, humanize_days
+from naggy.constants import INTERVAL_UNITS, KINDS, humanize_ago, humanize_days
 from naggy.db import Database
 from naggy.models import Reminder
 
@@ -126,6 +126,13 @@ def create_app(config_path: str) -> FastAPI:
     def reminder_json(r: Reminder, now: int) -> dict:
         due_in = r.due_at - now
         due_in_days = schedule.days_until(r.due_at, now, tz)
+        age_days = schedule.days_since(r.due_at, now, tz)
+        if r.kind == "open":
+            # No due date to count down to, so the date reads back as how long
+            # ago the chore was last done rather than forward as what's coming.
+            human = humanize_ago(age_days)
+        else:
+            human = humanize_days(due_in_days)
         return {
             "id": r.id,
             "title": r.title,
@@ -140,10 +147,12 @@ def create_app(config_path: str) -> FastAPI:
             "due_date": local_date(r.due_at),
             # Both grains are published: `due_in_days` is what Naggy actually
             # schedules on and what the UI shows, `due_in_seconds` stays for any
-            # consumer of the JSON seam that wants the raw distance.
+            # consumer of the JSON seam that wants the raw distance. `age_days`
+            # is the back-looking twin the open-ended cards and HA templates use.
             "due_in_days": due_in_days,
             "due_in_seconds": due_in,
-            "human": humanize_days(due_in_days),
+            "age_days": age_days,
+            "human": human,
             "status": r.status_at(now),
         }
 
@@ -152,6 +161,7 @@ def create_app(config_path: str) -> FastAPI:
         return {
             "pending": [reminder_json(r, now) for r in b["pending"]],
             "upcoming": [reminder_json(r, now) for r in b["upcoming"]],
+            "open": [reminder_json(r, now) for r in b["open"]],
         }
 
     def wants_partial(request: Request) -> bool:
@@ -243,10 +253,10 @@ def create_app(config_path: str) -> FastAPI:
         if not title:
             return JSONResponse({"error": "title is required"}, status_code=400)
 
-        # The form's "Repeats" tick box disables the cadence controls when it's
-        # off, and a disabled control isn't submitted — so an absent interval is
-        # itself the signal that this is a one-off. An explicit `kind` still wins,
-        # for anyone driving the API directly.
+        # The form's kind segment disables the cadence controls unless "Repeats"
+        # is picked, and a disabled control isn't submitted — so an absent
+        # interval is itself the signal that this is a one-off. An explicit `kind`
+        # still wins, for anyone driving the API directly.
         if kind not in KINDS:
             kind = "recurring" if (interval_n and interval_unit) else "oneshot"
         if interval_unit is not None and interval_unit not in INTERVAL_UNITS:
@@ -258,17 +268,22 @@ def create_app(config_path: str) -> FastAPI:
 
         now = now_epoch()
         # A cadence says how *often* a chore comes round but not which day it lands
-        # on, so the form picks the first due day outright (defaulting to today).
-        # A caller that omits it falls back to one interval from now, which is what
-        # Naggy did before there was a date picker. Only the first cycle is anchored
-        # either way — later ones are measured from when the chore is actually
-        # addressed, which is the point of an "every 2 weeks" reminder.
+        # on, so the form picks the first due day outright (defaulting to today);
+        # an open-ended reminder stores the day it was *last done* instead. A
+        # caller that omits the date falls back to one interval from now, which is
+        # what Naggy did before there was a date picker. Only the first cycle is
+        # anchored either way — later ones are measured from when the chore is
+        # actually addressed, which is the point of an "every 2 weeks" reminder.
         start_date = start_date.strip()
         if start_date:
             try:
                 due_at = schedule.due_from_date(start_date, tz)
             except ValueError:
                 return JSONResponse({"error": f"bad start date: {start_date}"}, status_code=400)
+        elif kind == "open":
+            # No last-done date given: treat it as done today, so the board starts
+            # counting from now instead of showing a phantom "N ago".
+            due_at = schedule.start_of_day(now, tz)
         elif interval_n and interval_unit:
             due_at = schedule.next_due(now, interval_n, interval_unit, tz)
         else:
@@ -390,10 +405,14 @@ def create_app(config_path: str) -> FastAPI:
 
 
 def _interval_label(r: Reminder) -> str:
-    # A one-shot's interval was only ever a way of *typing* its due date — and the
-    # date can now be picked outright or edited afterwards, so quoting the original
-    # cadence back ("once, in 11 weeks") would describe how the reminder was
-    # created rather than when it's due. The card already shows the date itself.
+    # An open-ended reminder has no cadence to speak of — its date is just when
+    # the chore happened — and a one-shot's interval was only ever a way of
+    # *typing* its due date. Both can now be picked outright or edited afterwards,
+    # so quoting the original cadence back ("once, in 11 weeks") would describe
+    # how the reminder was created rather than when it's due. The card already
+    # shows the date itself.
+    if r.kind == "open":
+        return "anytime"
     if r.kind == "oneshot" or not r.interval_n or not r.interval_unit:
         return "one-time"
     unit = r.interval_unit + ("" if r.interval_n == 1 else "s")

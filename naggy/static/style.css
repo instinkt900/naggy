@@ -34,20 +34,22 @@ body {
 .app-header h1 { margin: 0; font-size: 1.7rem; letter-spacing: -0.02em; }
 .app-header .tagline { margin: 2px 0 0; color: var(--muted); font-size: 0.9rem; }
 
-/* The add form sits *between* the two lists, but the whole board — both lists —
-   is one HTMX swap target, so the form can't live inside it in the markup: every
-   completion would re-render it and throw away whatever was half-typed. Instead
-   `display: contents` dissolves the board wrapper so its two sections become
-   flex items of `main` alongside the form, and `order` interleaves them. Every
-   direct child needs an explicit order, since the default of 0 sorts before any
-   of these. */
+/* The add form sits *between* the pending and upcoming lists, but the whole
+   board — all three sections — is one HTMX swap target, so the form can't live
+   inside it in the markup: every completion would re-render it and throw away
+   whatever was half-typed. Instead `display: contents` dissolves the board
+   wrapper so its sections become flex items of `main` alongside the form, and
+   `order` interleaves them. The "Anytime" section sorts last but one: below the
+   lists, above the hints. Every direct child needs an explicit order, since the
+   default of 0 sorts before any of these. */
 main { padding: 8px 14px 40px; display: flex; flex-direction: column; }
 #board { display: contents; }
 .pending  { order: 1; }
 .add      { order: 2; }
 .upcoming { order: 3; }
-.hint     { order: 4; }
-.notify   { order: 5; }
+.anytime  { order: 4; }
+.hint     { order: 5; }
+.notify   { order: 6; }
 
 section { margin-top: 22px; }
 section h2 {
@@ -157,32 +159,42 @@ input[type="text"], input[type="number"], input[type="date"], select {
 }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 
-/* "Repeats" tick box, and the cadence it gates. */
+/* Kind picker and the cadence it gates. The radios are visually hidden but stay
+   focusable; the label chip is the visible control, and :has() lights up the
+   one that's selected. */
 .field.repeat { gap: 10px; }
-.repeat-toggle {
+.kinds-seg {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 11px 13px;
+  gap: 4px;
+  padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
-  font-size: 0.95rem;
+}
+.kind-opt { flex: 1; position: relative; }
+.kind-opt input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.kind-opt span {
+  display: block;
+  text-align: center;
+  padding: 9px 6px;
+  border-radius: 7px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--muted);
   cursor: pointer;
 }
-.repeat-toggle input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
-  margin: 0;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
+.kind-opt:has(input:checked) span { background: var(--accent); color: #08152e; }
+.kind-opt input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .repeat-controls {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding-left: 13px;             /* sits under the tick box's label, as its detail */
+  padding-left: 13px;             /* sits under the picker, as its detail */
 }
 .repeat-controls > span { color: var(--muted); font-size: 0.92rem; }
 .repeat-controls input[type="number"] { width: 84px; }
@@ -236,7 +248,7 @@ button.ghost:disabled { color: var(--muted); cursor: default; }
 .modal form { display: flex; flex-direction: column; gap: 14px; }
 /* Inputs inside the dialog sit on --surface too, so lift them a shade to keep an edge. */
 .modal input[type="text"], .modal input[type="number"],
-.modal input[type="date"], .modal select, .modal .repeat-toggle { background: var(--surface-2); }
+.modal input[type="date"], .modal select, .modal .kinds-seg { background: var(--surface-2); }
 
 .modal-actions { display: flex; gap: 10px; }
 .modal-actions button { flex: 1; }
