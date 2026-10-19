@@ -34,7 +34,7 @@ naggy/
   web.py         FastAPI app factory (create_app); all routes as closures; tz helpers
   db.py          SQLite schema + Database wrapper (short-lived connections)
   models.py      dataclasses: Reminder, Completion, PushSubscription
-  schedule.py    PURE maths: next_due, start_of_day, due_from_date, days_until,
+  schedule.py    PURE maths: next_due, advance_due, start_of_day, due_from_date, days_until,
                  days_since, board, due_for_notification, notify_time
   notify.py      Web Push: VAPID keys, pywebpush sending, the notify pass
   config.py      TOML loader; dataclasses; _known() rejects unknown keys; secrets from env only
@@ -59,7 +59,9 @@ config.example.toml   the only tracked config; real config.toml is gitignored
   displayed without a time of day.
 - Each reminder has a canonical **`due_at`**; it is *pending* when `now >= due_at`
   and `active`. Recurring: `interval_n` + `interval_unit` (`day|week|month|year`);
-  on completion `due_at = schedule.next_due(now, n, unit, tz)`, stays active.
+  on completion `due_at = schedule.advance_due(due_at, now, n, unit, tz)` — stepped
+  from the *scheduled* date, never from `now`, so a late tap doesn't shift the
+  weekday (missed cycles are skipped to the next one still ahead); stays active.
   One-shot: `active` set to 0 on completion (archived; completion history kept).
   Open-ended (`kind = "open"`): `due_at` is the **last day the chore was done**, it
   never pends (`Reminder.is_pending` excludes open — and so do the badge count and
@@ -68,8 +70,8 @@ config.example.toml   the only tracked config; real config.toml is gitignored
 - A cadence fixes how *often* a chore comes round but not which day it lands on, so
   creation takes a **`start_date`** (`YYYY-MM-DD` from the form's date picker,
   pre-filled with today) that pins the first `due_at` via `schedule.due_from_date`.
-  It anchors **only the first cycle** — later ones are still measured from when the
-  chore is actually addressed. Editing a reminder's date is the same conversion
+  Later cycles keep stepping from that date, whenever the chore is actually
+  addressed. Editing a reminder's date is the same conversion
   (`due_date` on the PATCH). Omitting it falls back to one interval from now, which
   is what Naggy did before the picker existed, so old API callers still work.
 - **`kind` is a three-way choice, not a tick box**: radios `recurring | oneshot |

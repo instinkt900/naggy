@@ -116,6 +116,45 @@ def test_bad_inputs_raise():
         pass
 
 
+# --- advance_due keeps the schedule fixed ------------------------------------
+
+
+def test_advance_due_late_tap_keeps_weekday():
+    """The reported bug: weekly rubbish due Monday, ticked off at 00:30 Tuesday,
+    must next fall due the following Monday — not Tuesday."""
+    due = _epoch(2026, 10, 12)  # Monday
+    got = schedule.advance_due(due, _epoch(2026, 10, 13, 0, 30), 1, "week", MELB)
+    assert _parts(got) == (2026, 10, 19, 0, 0), _parts(got)
+
+
+def test_advance_due_on_the_day():
+    due = _epoch(2026, 10, 12)
+    got = schedule.advance_due(due, _epoch(2026, 10, 12, 20, 0), 1, "week", MELB)
+    assert _parts(got) == (2026, 10, 19, 0, 0), _parts(got)
+
+
+def test_advance_due_skips_missed_cycles():
+    # Two weeks and a day late: the Monday that's already gone is skipped, the
+    # next one still ahead is the new due date.
+    due = _epoch(2026, 10, 12)
+    got = schedule.advance_due(due, _epoch(2026, 10, 27, 9, 0), 1, "week", MELB)
+    assert _parts(got) == (2026, 11, 2, 0, 0), _parts(got)
+
+
+def test_advance_due_early_tap_counts_for_this_cycle():
+    # Done before it fell due: that cycle is done, the next one follows it.
+    due = _epoch(2026, 10, 19)
+    got = schedule.advance_due(due, _epoch(2026, 10, 17, 9, 0), 1, "week", MELB)
+    assert _parts(got) == (2026, 10, 26, 0, 0), _parts(got)
+
+
+def test_advance_due_month_clamp_doesnt_stick():
+    # Anchored on the 31st: Feb clamps to the 28th, but March is back on the 31st.
+    due = _epoch(2026, 1, 31)
+    got = schedule.advance_due(due, _epoch(2026, 3, 1, 9, 0), 1, "month", MELB)
+    assert _parts(got) == (2026, 3, 31, 0, 0), _parts(got)
+
+
 # --- start_of_day / days_until -----------------------------------------------
 
 

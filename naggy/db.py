@@ -195,7 +195,9 @@ class Database:
                     (r.due_at, r.last_done_at, reminder_id),
                 )
             elif r.kind == "recurring" and r.interval_n and r.interval_unit:
-                r.due_at = schedule.next_due(now, r.interval_n, r.interval_unit, tz)
+                # Step from the scheduled date, not from now: a late tap resets
+                # the timer without shifting the day the chore falls on.
+                r.due_at = schedule.advance_due(r.due_at, now, r.interval_n, r.interval_unit, tz)
                 r.last_done_at = now
                 conn.execute(
                     "UPDATE reminders SET due_at = ?, last_done_at = ? WHERE id = ?",

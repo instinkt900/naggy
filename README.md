@@ -111,14 +111,15 @@ flag isn't exposed to web apps. Two settings get close:
 Every reminder has a canonical `due_at` (UTC epoch seconds) — the moment it becomes
 pending (`now >= due_at`). Recurring reminders carry an interval `(n, unit)` where
 unit is `day | week | month | year`; on completion the timer resets via
-`schedule.next_due`. One-off reminders are archived (kept for history, hidden from
+`schedule.advance_due`, which steps from the date the chore was *due* rather than
+when it was ticked off — so bins due Monday stay on Mondays even if you tap them
+after midnight. Missed cycles are skipped to the next date still ahead. One-off reminders are archived (kept for history, hidden from
 lists) on completion.
 
 A cadence says how often a chore comes round, not which day it lands on, so the
 first `due_at` can be set outright from a picked date (`schedule.due_from_date`)
-instead of being derived from the interval. Only the first cycle is anchored that
-way — after that the interval is measured from when the chore is actually
-addressed, which is the point of "every 2 weeks".
+instead of being derived from the interval. Every later cycle keeps stepping from
+that date, so the picked day is the one the chore keeps landing on.
 
 Naggy is **date-grained**: `due_at` is always the local midnight that opens the day
 a chore is due, and the interval arithmetic is done on local calendar dates rather

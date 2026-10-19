@@ -51,6 +51,29 @@ def next_due(from_epoch: int, n: int, unit: str, tz: ZoneInfo) -> int:
     return start_of_day_on(target, tz)
 
 
+def advance_due(due_at: int, now: int, n: int, unit: str, tz: ZoneInfo) -> int:
+    """The next due date after addressing a recurring reminder: the first whole
+    step of the cadence past `due_at` that lands after today.
+
+    Stepping from the *scheduled* date rather than from `now` is what keeps a
+    schedule fixed: bins go out every Tuesday whether the chore is ticked off on
+    Tuesday evening or at 00:30 on Wednesday, so a late tap mustn't drag every
+    following cycle a day later. If whole cycles were missed they're skipped —
+    the next due date is the next one still ahead, not one already gone.
+
+    Skipped steps are taken from `due_at` as one hop (k * n units) rather than
+    chained, so skipping past a clamped month (Jan 31 -> Feb 28) still lands back
+    on the 31st in March.
+    """
+    today = start_of_day(now, tz)
+    k = 1
+    while True:
+        nxt = next_due(due_at, k * n, unit, tz)
+        if nxt > today:
+            return nxt
+        k += 1
+
+
 def start_of_day(epoch: int, tz: ZoneInfo) -> int:
     """Local midnight opening the day `epoch` falls in.
 
