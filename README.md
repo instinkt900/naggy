@@ -157,15 +157,8 @@ docker compose up -d --build            # host port ${NAGGY_PORT:-8090} -> 8080
 curl localhost:8090/healthz
 ```
 
-Code is baked into the image, so a code/template/static change needs a rebuild:
-`git pull --ff-only && docker compose up -d --build` (which `deploy/install-server.sh`
-wraps) on a hand-managed checkout.
-
-The live instance is not hand-managed: its checkout is cloned and built by Ansible
-at a pinned commit, so pulling on the host would drift from the pin. To ship a
-release there, push it, set naggy's `git.version` to the new full commit SHA in the
-Ansible repo's host_vars, and run its `04-deploy_stacks.yml` playbook with
-`-e compose_stack_only=naggy`.
+Code is baked into the image, so a code/template/static change needs a rebuild.
+To update, `deploy/install-server.sh` runs `git pull --ff-only && docker compose up -d --build`.
 
 ## Roadmap (designed for, not yet built)
 
