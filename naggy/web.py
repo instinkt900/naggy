@@ -412,7 +412,7 @@ def _interval_label(r: Reminder) -> str:
     # how the reminder was created rather than when it's due. The card already
     # shows the date itself.
     if r.kind == "open":
-        return "anytime"
+        return "last done"
     if r.kind == "oneshot" or not r.interval_n or not r.interval_unit:
         return "one-time"
     unit = r.interval_unit + ("" if r.interval_n == 1 else "s")

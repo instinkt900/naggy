@@ -1,7 +1,7 @@
 """Naggy command-line entrypoint.
 
 Subcommands: serve (web app), init-db (create schema and exit), report (print
-what's pending/upcoming/anytime, text or JSON), notify (push for anything newly
+what's pending/upcoming/last done, text or JSON), notify (push for anything newly
 due),
 vapid-keys (mint a push signing key). Imports are lazy per branch so a quick
 command doesn't drag in uvicorn/fastapi — or, for `notify`, the crypto stack.
@@ -190,7 +190,7 @@ def _report(config_path: str, *, as_json: bool) -> int:
         print(f"  • {r.title}  [{human(r)}]")
     if not b["upcoming"]:
         print("  (none)")
-    print(f"\nAnytime ({len(b['open'])}):")
+    print(f"\nLast done ({len(b['open'])}):")
     for r in b["open"]:
         print(f"  • {r.title}  [{human(r)}]")
     if not b["open"]:

@@ -7,12 +7,12 @@ Context for working on this repo. Product **display name** is "Naggy"; the
 
 A small, self-contained phone-first reminder app for household chores. A reminder
 either **repeats** on a cadence ("clean bedsheets" every 2 weeks), fires **once**
-("harvest carrots" in 11 weeks), or is **open-ended** ("water the plants") with no
-cadence at all — it records *when the chore last happened* instead of when it is
+("harvest carrots" in 11 weeks), or is **open-ended** — shown in the UI as
+**"Last done"** ("water the plants") — with no cadence at all — it records *when the chore last happened* instead of when it is
 due. Expired reminders surface under **Pending actions**; tapping one confirms and
 "addresses" it — a recurring reminder resets its timer, a one-off is archived, an
 open-ended one stamps today as its last-done date. **Long-pressing** any card opens
-a dialog that edits every field, the due date included.
+a dialog that edits every field, the due date included (and deletes it).
 
 Modelled closely on the sibling app *Sugar Daddy* (`~/Development/sugardaddy`) —
 reuse its idioms.
@@ -75,29 +75,33 @@ config.example.toml   the only tracked config; real config.toml is gitignored
   (`due_date` on the PATCH). Omitting it falls back to one interval from now, which
   is what Naggy did before the picker existed, so old API callers still work.
 - **`kind` is a three-way choice, not a tick box**: radios `recurring | oneshot |
-  open` (recurring is the default in both forms). Any non-recurring kind makes
-  `phone.js` *disable* the cadence controls — a disabled control isn't submitted,
-  so a one-off or an open-ended one sends no interval at all rather than a stale
-  one. `interval_n`/`interval_unit` are therefore **optional** on `POST`; when
+  open`, labelled Once / Repeats / Last done (recurring is the default in both
+  forms). The kind picks the form's layout: `phone.js` shows only the fields whose
+  `data-kinds` lists it and *disables* the rest — a disabled control isn't
+  submitted, so a one-off or an open-ended one sends no interval at all rather
+  than a stale one. `interval_n`/`interval_unit` are therefore **optional** on `POST`; when
   `kind` is absent entirely it's derived from whether an interval came, so a
   pre-radio request still means what it used to. `kind = recurring` with no
   interval is a 400. An open-ended form without a date means "done today".
-- The date field is relabelled per kind: "First due" / "Next due" for the cadence
-  kinds, "Last done" for open-ended — same picker, same `due_date` field, the
-  label is just honest about which way the arrow points.
+- The date field is relabelled per kind (`data-label-<kind>` on the label): "Due
+  on" for a one-off, "First due" / "Next due" for a repeating one, "Last done" for
+  open-ended — same picker, same `due_date` field, the label is just honest about
+  which way the arrow points. The add sheet adds quick-pick chips under it for
+  one-offs (forward) and last-done (back), counted from the form's `data-today`
+  with the same end-of-month clamp as `schedule.py`.
 - A PATCH to a non-recurring `kind` leaves the stored cadence alone (only `kind`
-  changes), so switching back restores it — the dialog shows it greyed out
-  meanwhile. Nothing reads a one-off's or open-ended reminder's interval:
-  `_interval_label` says "one-time" / "anytime" and `db.complete_reminder`
+  changes), so switching back restores it — the dialog keeps it in the hidden
+  inputs meanwhile. Nothing reads a one-off's or open-ended reminder's interval:
+  `_interval_label` says "one-time" / "last done" and `db.complete_reminder`
   archives on `kind != recurring` (open resets `due_at` to today instead).
 - An open-ended reminder's interval would be a way of *typing* a past date, so it
-  isn't shown back either: `_interval_label` reads "one-time" / "anytime"
+  isn't shown back either: `_interval_label` reads "one-time" / "last done"
   regardless of what's stored.
 - Open-ended cards read "**last done N ago**" instead of a due phrase:
   `schedule.days_since` counts *dates* back from `due_at` to now (the mirror of
   `days_until`, same local-midnight grain) and `constants.humanize_ago` renders it
   ("today", "yesterday", "2 weeks ago" — coarse buckets via `_coarse_days`). On the
-  board they live in their own **"Anytime"** section *below* Upcoming (order 4) and
+  board they live in their own **"Last done"** section *below* Upcoming and
   sort **oldest last-done first**, so the stalest chore floats up; the section
   renders only when non-empty and re-renders with every board swap.
 - **Keep `schedule.py` pure** (no I/O, no wall clock, no config — tz is passed in).
@@ -124,17 +128,21 @@ config.example.toml   the only tracked config; real config.toml is gitignored
   or a JSON one, whichever the `Content-Type` says. Every field is optional:
   `_clean_updates` in `web.py` validates and coerces only the keys present, so an
   absent field means "leave it alone" rather than "blank it".
-- The add form sits **between** the pending and upcoming lists, but stays outside
-  the swapped fragment: `#board` is `display: contents` so its sections become
-  flex items of `main` and CSS `order` interleaves the form between them (the
-  "Anytime" section sorts below Upcoming, above the hints). Moving the form into
-  `partials/board.html` instead would look identical and then throw away
-  half-typed input on every completion — don't. Any new direct child of
-  `main` needs an explicit `order` (the default 0 sorts before all of them).
+- The main view is the board only: Pending, Upcoming, Last done, in that order.
+  The add form is a bottom-sheet `<dialog id="add-modal">` opened by the fixed +
+  button (`.fab`), and like the edit dialog it stays **outside** the swapped
+  fragment — inside `partials/board.html` it would throw away half-typed input on
+  every completion. A successful add resets the form and closes the sheet;
+  Cancel or a backdrop tap closes it and keeps the draft.
+- **Pending cards have no ✕**: the whole card is one button that confirms and
+  completes, so there's nothing to delete by mistake beside it. Upcoming and
+  Last done cards keep their ✕ (with a confirm). Deleting a pending reminder is
+  the **Delete reminder** button in the edit dialog.
 - The edit dialog is **one** `<dialog>` in `phone/index.html`, outside `#board` so a
   swap can't yank it away mid-edit; a long press fills it from the pressed card's
   `data-*` attributes (no round trip) and `phone.js` fires the PATCH through
-  `htmx.ajax`. It can't use `hx-patch`: htmx bakes the URL in when it processes the
+  `htmx.ajax` (its DELETE too, sourced from the dialog rather than the form so
+  htmx's form validation can't block it). It can't use `hx-patch`: htmx bakes the URL in when it processes the
   element, and the reminder id isn't known until a card is pressed.
 - `sw.js` is **network-first**, so code/template/static changes roll out on reload.
 

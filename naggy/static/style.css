@@ -34,22 +34,14 @@ body {
 .app-header h1 { margin: 0; font-size: 1.7rem; letter-spacing: -0.02em; }
 .app-header .tagline { margin: 2px 0 0; color: var(--muted); font-size: 0.9rem; }
 
-/* The add form sits *between* the pending and upcoming lists, but the whole
-   board — all three sections — is one HTMX swap target, so the form can't live
-   inside it in the markup: every completion would re-render it and throw away
-   whatever was half-typed. Instead `display: contents` dissolves the board
-   wrapper so its sections become flex items of `main` alongside the form, and
-   `order` interleaves them. The "Anytime" section sorts last but one: below the
-   lists, above the hints. Every direct child needs an explicit order, since the
-   default of 0 sorts before any of these. */
-main { padding: 8px 14px 40px; display: flex; flex-direction: column; }
-#board { display: contents; }
-.pending  { order: 1; }
-.add      { order: 2; }
-.upcoming { order: 3; }
-.anytime  { order: 4; }
-.hint     { order: 5; }
-.notify   { order: 6; }
+/* The board reads top to bottom: pending, upcoming, last done. The add form is
+   in a sheet behind the + button, so nothing sits between the lists; the
+   bottom padding keeps the button from covering the last card. */
+main { padding: 8px 14px 104px; }
+
+/* `hidden` has to win over the display rules below (.field is flex), or the
+   per-kind layouts in the forms would show every field at once. */
+[hidden] { display: none !important; }
 
 section { margin-top: 22px; }
 section h2 {
@@ -144,8 +136,26 @@ section h2 {
   text-align: center;
 }
 
-/* --- add form --- */
-.add form { display: flex; flex-direction: column; gap: 14px; }
+/* --- add button --- */
+.fab {
+  position: fixed;
+  right: max(18px, calc((100vw - 560px) / 2 + 18px));
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--accent);
+  color: #08152e;
+  font-size: 2rem;
+  font-weight: 500;
+  line-height: 1;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+.fab:active { filter: brightness(0.92); }
+
+/* --- forms --- */
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > span { font-size: 0.82rem; color: var(--muted); }
 
@@ -159,10 +169,9 @@ input[type="text"], input[type="number"], input[type="date"], select {
 }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 
-/* Kind picker and the cadence it gates. The radios are visually hidden but stay
-   focusable; the label chip is the visible control, and :has() lights up the
-   one that's selected. */
-.field.repeat { gap: 10px; }
+/* Kind picker: it decides which fields the rest of the form shows. The radios
+   are visually hidden but stay focusable; the label chip is the visible
+   control, and :has() lights up the one that's selected. */
 .kinds-seg {
   display: flex;
   gap: 4px;
@@ -194,15 +203,25 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding-left: 13px;             /* sits under the picker, as its detail */
 }
 .repeat-controls > span { color: var(--muted); font-size: 0.92rem; }
 .repeat-controls input[type="number"] { width: 84px; }
 .repeat-controls select { flex: 1; }
-/* Off, not gone: the cadence stays legible so re-ticking the box shows what it
-   will go back to. */
-.repeat-controls.is-off { opacity: 0.42; }
-.repeat-controls :disabled { cursor: not-allowed; }
+
+/* Quick picks under the date: a tap fills the picker, which stays editable. */
+.quick-dates { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.chip {
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 4px;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.chip:active { background: var(--border); }
 
 button.primary {
   background: var(--accent);
@@ -244,6 +263,7 @@ button.ghost:disabled { color: var(--muted); cursor: default; }
   border-radius: var(--radius);
 }
 .modal::backdrop { background: rgba(0, 0, 0, 0.6); }
+.modal h2:focus { outline: none; }
 .modal h2 { margin: 0 0 14px; font-size: 1.05rem; color: var(--text); text-transform: none; letter-spacing: -0.01em; }
 .modal form { display: flex; flex-direction: column; gap: 14px; }
 /* Inputs inside the dialog sit on --surface too, so lift them a shade to keep an edge. */
@@ -252,6 +272,35 @@ button.ghost:disabled { color: var(--muted); cursor: default; }
 
 .modal-actions { display: flex; gap: 10px; }
 .modal-actions button { flex: 1; }
+
+/* The add form as a bottom sheet: it opens from the + at the thumb's end of
+   the screen, so it rises from there too. */
+.modal.sheet {
+  width: 100%;
+  max-width: 560px;
+  max-height: 92vh;
+  max-height: 92dvh;
+  margin: auto auto 0;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.modal.sheet[open] { animation: sheet-up 0.18s ease-out; }
+@keyframes sheet-up { from { transform: translateY(40px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .modal.sheet[open] { animation: none; } }
+/* Inside the sheet the chips sit on the lifted input shade, so drop one more. */
+.modal .chip { background: var(--surface); }
+
+.danger-link {
+  align-self: center;
+  background: none;
+  border: 0;
+  color: var(--danger);
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 6px 10px;
+  cursor: pointer;
+}
 
 .modal-error { margin: 0; color: var(--danger); font-size: 0.82rem; }
 .modal-error:empty { display: none; }

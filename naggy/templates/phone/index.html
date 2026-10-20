@@ -11,54 +11,6 @@
   {% include "partials/board.html" %}
   <p class="hint">Long-press a reminder to edit it.</p>
 
-  <section class="add">
-    <h2>Add a reminder</h2>
-    <form id="add-form"
-          hx-post="/api/reminders"
-          hx-target="#board" hx-swap="outerHTML"
-          hx-on::after-request="if(event.detail.successful) this.reset()">
-      <label class="field">
-        <span>What needs doing?</span>
-        <input type="text" name="title" placeholder="Clean bedsheets" required autocomplete="off">
-      </label>
-
-      {# The date field re-labels itself with the kind: open-ended reminders
-         have no due date — the date is merely the day they were last done. #}
-      <label class="field">
-        <span class="kind-date-label" data-label="First due">First due</span>
-        <input type="date" name="start_date" value="{{ today }}" required>
-      </label>
-
-      {# The radios carry `kind` themselves; phone.js disables the cadence
-         controls unless the kind is recurring, and a disabled control isn't
-         submitted — so a one-off or an open-ended reminder sends no interval at
-         all rather than a stale one the server would have to ignore. #}
-      <div class="field repeat">
-        <div class="kinds-seg" role="radiogroup" aria-label="Kind">
-          <label class="kind-opt"><input type="radio" name="kind" value="oneshot"><span>Once</span></label>
-          <label class="kind-opt"><input type="radio" name="kind" value="recurring" checked><span>Repeats</span></label>
-          <label class="kind-opt"><input type="radio" name="kind" value="open"><span>Anytime</span></label>
-        </div>
-        <div class="repeat-controls">
-          <span>every</span>
-          <input type="number" name="interval_n" value="2" min="1" inputmode="numeric" required>
-          <select name="interval_unit">
-            {% for u in units %}
-              <option value="{{ u }}" {% if u == 'week' %}selected{% endif %}>{{ u }}(s)</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
-
-      <label class="field">
-        <span>Notes (optional)</span>
-        <input type="text" name="notes" placeholder="Hot wash, line dry" autocomplete="off">
-      </label>
-
-      <button type="submit" class="primary">Add reminder</button>
-    </form>
-  </section>
-
   <section class="notify">
     <h2>Notifications</h2>
     <button type="button" id="notify-toggle" class="ghost" disabled>Checking…</button>
@@ -66,30 +18,107 @@
   </section>
 </main>
 
+{# The add form lives in a sheet behind the + button, so the board is all the
+   main view shows. Like the edit dialog it sits outside #board: a completion
+   swaps the board, and a sheet inside it would lose whatever was half-typed. #}
+<button type="button" class="fab" id="add-open" aria-label="Add a reminder" title="Add a reminder">+</button>
+
+{# The headings take the opening focus (autofocus, tabindex -1): left to
+   itself the dialog focuses the first radio, whose focus ring then reads as a
+   second selected kind, and focusing a text field would pop the keyboard
+   before the kind is picked. #}
+<dialog id="add-modal" class="modal sheet">
+  <h2 tabindex="-1" autofocus>Add a reminder</h2>
+  {# The kind comes first because it decides the rest of the layout: phone.js
+     shows only the fields tagged with the picked kind (data-kinds) and
+     disables the others. A disabled control isn't submitted, so a one-off or
+     a last-done reminder sends no interval at all rather than a stale one. #}
+  <form id="add-form"
+        hx-post="/api/reminders"
+        hx-target="#board" hx-swap="outerHTML"
+        data-today="{{ today }}">
+    <div class="kinds-seg" role="radiogroup" aria-label="Kind">
+      <label class="kind-opt"><input type="radio" name="kind" value="oneshot"><span>Once</span></label>
+      <label class="kind-opt"><input type="radio" name="kind" value="recurring" checked><span>Repeats</span></label>
+      <label class="kind-opt"><input type="radio" name="kind" value="open"><span>Last done</span></label>
+    </div>
+
+    <label class="field">
+      <span>What needs doing?</span>
+      <input type="text" name="title" placeholder="Clean bedsheets" required autocomplete="off">
+    </label>
+
+    <div class="field" data-kinds="recurring">
+      <span>Repeats</span>
+      <div class="repeat-controls">
+        <span>every</span>
+        <input type="number" name="interval_n" value="2" min="1" inputmode="numeric" required>
+        <select name="interval_unit">
+          {% for u in units %}
+            <option value="{{ u }}" {% if u == 'week' %}selected{% endif %}>{{ u }}(s)</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    {# Same picker for every kind; only its label and quick picks change. A
+       last-done reminder has no due date — the date is the day it was last
+       done, and a blank one means today. #}
+    <div class="field">
+      <span class="kind-date-label"
+            data-label-oneshot="Due on" data-label-recurring="First due"
+            data-label-open="Last done">First due</span>
+      <input type="date" name="start_date" value="{{ today }}" required>
+      <div class="quick-dates" data-kinds="oneshot">
+        <button type="button" class="chip" data-days="1">Tomorrow</button>
+        <button type="button" class="chip" data-days="7">1 week</button>
+        <button type="button" class="chip" data-months="1">1 month</button>
+        <button type="button" class="chip" data-months="3">3 months</button>
+      </div>
+      <div class="quick-dates" data-kinds="open">
+        <button type="button" class="chip" data-days="0">Today</button>
+        <button type="button" class="chip" data-days="-1">Yesterday</button>
+        <button type="button" class="chip" data-days="-7">A week ago</button>
+        <button type="button" class="chip" data-months="-1">A month ago</button>
+      </div>
+    </div>
+
+    <label class="field">
+      <span>Notes (optional)</span>
+      <input type="text" name="notes" placeholder="Hot wash, line dry" autocomplete="off">
+    </label>
+
+    <p class="modal-error" id="add-error"></p>
+
+    <div class="modal-actions">
+      <button type="button" class="ghost" data-close-modal>Cancel</button>
+      <button type="submit" class="primary">Add</button>
+    </div>
+  </form>
+</dialog>
+
 {# Opened by a long press on any card (see phone.js), which fills it from the
    card's data-* attributes — one dialog for the whole board rather than one per
    reminder, and it lives outside #board so an HTMX swap can't yank it away
    mid-edit. The PATCH is issued from phone.js: hx-patch would bake the URL in at
-   load time, and the id isn't known until a card is pressed. #}
+   load time, and the id isn't known until a card is pressed. It is also where a
+   pending reminder gets deleted, since its card has no ✕. #}
 <dialog id="edit-modal" class="modal">
-  <h2>Edit reminder</h2>
+  <h2 tabindex="-1" autofocus>Edit reminder</h2>
   <form id="edit-form">
+    <div class="kinds-seg" role="radiogroup" aria-label="Kind">
+      <label class="kind-opt"><input type="radio" name="kind" value="oneshot"><span>Once</span></label>
+      <label class="kind-opt"><input type="radio" name="kind" value="recurring" checked><span>Repeats</span></label>
+      <label class="kind-opt"><input type="radio" name="kind" value="open"><span>Last done</span></label>
+    </div>
+
     <label class="field">
       <span>What needs doing?</span>
       <input type="text" name="title" required autocomplete="off">
     </label>
 
-    <label class="field">
-      <span class="kind-date-label" data-label="Next due">Next due</span>
-      <input type="date" name="due_date" required>
-    </label>
-
-    <div class="field repeat">
-      <div class="kinds-seg" role="radiogroup" aria-label="Kind">
-        <label class="kind-opt"><input type="radio" name="kind" value="oneshot"><span>Once</span></label>
-        <label class="kind-opt"><input type="radio" name="kind" value="recurring" checked><span>Repeats</span></label>
-        <label class="kind-opt"><input type="radio" name="kind" value="open"><span>Anytime</span></label>
-      </div>
+    <div class="field" data-kinds="recurring">
+      <span>Repeats</span>
       <div class="repeat-controls">
         <span>every</span>
         <input type="number" name="interval_n" min="1" inputmode="numeric" required>
@@ -102,6 +131,13 @@
     </div>
 
     <label class="field">
+      <span class="kind-date-label"
+            data-label-oneshot="Due on" data-label-recurring="Next due"
+            data-label-open="Last done">Next due</span>
+      <input type="date" name="due_date" required>
+    </label>
+
+    <label class="field">
       <span>Notes (optional)</span>
       <input type="text" name="notes" autocomplete="off">
     </label>
@@ -112,6 +148,7 @@
       <button type="button" class="ghost" data-close-modal>Cancel</button>
       <button type="submit" class="primary">Save</button>
     </div>
+    <button type="button" class="danger-link" id="edit-delete">Delete reminder</button>
   </form>
 </dialog>
 {% endblock %}

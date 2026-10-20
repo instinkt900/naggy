@@ -29,11 +29,12 @@ python -m naggy init-db -c config.toml
 python -m naggy serve   -c config.toml  # open http://localhost:8080/
 ```
 
-Add a reminder from the form between the two lists: give it a name and the day it's
-first due (today, unless you pick another), then tick **Repeats** and set a cadence
-if it should come round again — leave it unticked for a one-off. Pending items
-appear at the top; tap one to mark it done, or **long-press** any reminder to edit
-its name, date, cadence and notes.
+Tap **+** to add a reminder. Pick its kind first — **Once** (a due date),
+**Repeats** (a cadence and the day it's first due) or **Last done** (no due date;
+it tracks when you last did it) — and the form shows just the fields that kind
+needs. The board lists Pending items first, then Upcoming, then Last done. Tap a
+pending item anywhere to mark it done; the others have a ✕ to delete them.
+**Long-press** any reminder to edit its name, date, cadence and notes, or delete it.
 
 ## Commands
 

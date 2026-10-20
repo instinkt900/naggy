@@ -1,33 +1,34 @@
 // Phone UI glue. The board and form updates are all HTMX; what's left to wire by
-// hand is the kind picker (it gates the cadence controls and re-labels the date
-// field), the long-press
+// hand is the kind picker (it picks which fields each form shows and re-labels
+// the date field), the add sheet behind the + button, the long-press
 // edit dialog (a gesture HTMX has no trigger for), and the push notification
 // toggle, which HTMX can't express because it has to talk to the browser's
 // PushManager before it has anything to send the server.
 (function () {
   "use strict";
 
-  // The kind radios are the only control for `kind`, so they drive three things:
-  // the enabled state of the cadence controls, the date field's label, and that
-  // field's requiredness. Disabling the controls isn't only cosmetic — a disabled
-  // control is left out of the submission, which is exactly what a one-off or an
-  // open-ended reminder should send: no interval for the server to store or drift.
-  // Open-ended reminders have no due date at all, so the date becomes "the day it
+  // The kind radios are the only control for `kind`, and they pick the form's
+  // layout: each field tagged `data-kinds` shows only for the kinds it lists, and
+  // its controls are disabled otherwise. Disabling isn't only cosmetic — a
+  // disabled control is left out of the submission, which is exactly what a
+  // one-off or a last-done reminder should send: no interval for the server to
+  // store or drift. The values stay in the hidden inputs, so switching back in
+  // the edit dialog restores the cadence the reminder had.
+  // A last-done reminder has no due date at all, so the date becomes "the day it
   // was last done" and may be left blank (the server then means "today").
   function syncKind(form) {
     if (!form) return;
     const checked = form.querySelector('input[name="kind"]:checked');
     const kind = checked ? checked.value : "recurring";
-    const off = kind !== "recurring";
-    const controls = form.querySelector(".repeat-controls");
-    if (controls) {
-      controls.querySelectorAll("input, select").forEach((el) => { el.disabled = off; });
-      controls.classList.toggle("is-off", off);
-    }
+    form.querySelectorAll("[data-kinds]").forEach((el) => {
+      const on = el.dataset.kinds.split(" ").includes(kind);
+      el.hidden = !on;
+      el.querySelectorAll("input, select").forEach((c) => { c.disabled = !on; });
+    });
     const label = form.querySelector(".kind-date-label");
-    if (label) label.textContent = kind === "open" ? "Last done" : (label.dataset.label || "Next due");
+    if (label) label.textContent = label.dataset["label" + kind[0].toUpperCase() + kind.slice(1)] || label.textContent;
     const date = form.querySelector('input[type="date"]');
-    if (date) date.required = !off;
+    if (date) date.required = kind !== "open";
   }
 
   function syncKinds() {
@@ -39,11 +40,76 @@
   });
 
   // form.reset() after a successful add restores the default-checked radio but
-  // not the disabled flags it drives, which would leave the two disagreeing. The
-  // event fires *before* the reset lands, hence the deferral.
+  // not the layout it drives, which would leave the two disagreeing. The event
+  // fires *before* the reset lands, hence the deferral.
   document.addEventListener("reset", (e) => {
     const form = e.target;
     setTimeout(() => syncKind(form), 0);
+  });
+
+  // --- quick-pick dates ---------------------------------------------------------
+
+  // "1 month", "a week ago" and friends, counted from the server's idea of today
+  // (the form's data-today) so they land on the same day grid the schedule uses.
+  // Months clamp to the end of the month, as schedule.py does, rather than
+  // spilling over the way Date.setMonth would (31 Jan + 1 month is 28 Feb, not
+  // 3 Mar).
+  function shiftDate(iso, days, months) {
+    const [y, m, d] = iso.split("-").map(Number);
+    let date;
+    if (months) {
+      const first = new Date(y, m - 1 + months, 1);
+      const last = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+      date = new Date(first.getFullYear(), first.getMonth(), Math.min(d, last));
+    } else {
+      date = new Date(y, m - 1, d + days);
+    }
+    const pad = (n) => String(n).padStart(2, "0");
+    return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+  }
+
+  document.addEventListener("click", (e) => {
+    const chip = e.target.closest && e.target.closest(".quick-dates .chip");
+    if (!chip) return;
+    const form = chip.form;
+    const input = form && form.querySelector('input[type="date"]');
+    if (!input || !form.dataset.today) return;
+    input.value = shiftDate(form.dataset.today,
+      parseInt(chip.dataset.days || "0", 10), parseInt(chip.dataset.months || "0", 10));
+  });
+
+  // --- add sheet ----------------------------------------------------------------
+
+  function initAdd() {
+    const dlg = document.getElementById("add-modal");
+    const form = document.getElementById("add-form");
+    const open = document.getElementById("add-open");
+    if (!dlg || !form || !open) return;
+    const error = document.getElementById("add-error");
+
+    open.addEventListener("click", () => {
+      if (error) error.textContent = "";
+      syncKind(form);
+      dlg.showModal();
+    });
+
+    form.addEventListener("htmx:afterRequest", (e) => {
+      if (e.detail.successful) {
+        form.reset();
+        dlg.close();
+      } else if (error) {
+        error.textContent = "Couldn't add that — check the fields and try again.";
+      }
+    });
+  }
+
+  // Both dialogs close on their Cancel button or a tap on the backdrop (which
+  // targets the dialog itself). Closing the add sheet keeps what was typed, so an
+  // accidental tap outside doesn't cost the draft.
+  document.addEventListener("click", (e) => {
+    const dlg = e.target.closest && e.target.closest("dialog.modal");
+    if (!dlg) return;
+    if (e.target === dlg || e.target.hasAttribute("data-close-modal")) dlg.close();
   });
 
   // --- long-press to edit -----------------------------------------------------
@@ -158,10 +224,24 @@
       else setEditError("Couldn't save that — check the fields and try again.");
     });
 
-    dlg.addEventListener("click", (e) => {
-      // Clicking the backdrop targets the dialog itself.
-      if (e.target === dlg || e.target.hasAttribute("data-close-modal")) dlg.close();
-    });
+    // A pending card has no ✕ (a tap anywhere on it ticks the chore off), so
+    // this is where one gets deleted. The response swaps #board like any other
+    // mutation.
+    const del = document.getElementById("edit-delete");
+    if (del) {
+      del.addEventListener("click", () => {
+        const title = form.elements.title.value;
+        if (!confirm("Delete “" + title + "” entirely?")) return;
+        setEditError("");
+        // Sourced from the dialog, not the form: htmx validates a form source
+        // even for a DELETE, so a half-edited (invalid) form would block it.
+        htmx.ajax("DELETE", "/api/reminders/" + form.dataset.id, {
+          source: dlg,
+          target: "#board",
+          swap: "outerHTML",
+        }).then(() => dlg.close(), () => setEditError("Couldn't delete that — try again."));
+      });
+    }
   }
 
   // --- home-screen icon badge -------------------------------------------------
@@ -284,6 +364,7 @@
   // Run once on load, and again after any HTMX swap re-renders the board/form.
   window.addEventListener("load", syncKinds);
   window.addEventListener("load", syncBadge);
+  window.addEventListener("load", initAdd);
   window.addEventListener("load", initEditor);
   window.addEventListener("load", initPush);
   document.body.addEventListener("htmx:afterSwap", syncKinds);
