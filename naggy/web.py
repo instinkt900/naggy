@@ -10,12 +10,18 @@ The phone UI is HTMX-driven: mutations POST a form and get back the re-rendered
 `partials/board.html` fragment to swap in. The same endpoints answer JSON when the
 request isn't from HTMX, and the read endpoints (`/api/reminders`, `/api/pending`)
 are the stable JSON seam a future Home Assistant dashboard would poll.
+
+NFC tags hold a plain URL, `/t/<token>`. Android opens it when the phone touches
+the tag, so a scan is an ordinary page load: it ticks the chore off (if
+`schedule.scan_action` says it should) and redirects to a result page with an
+Undo — the point of a tag is not having to open the app and confirm.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -23,7 +29,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -31,7 +37,7 @@ from naggy import __version__, notify, schedule
 from naggy.config import load_config
 from naggy.constants import INTERVAL_UNITS, KINDS, humanize_ago, humanize_days
 from naggy.db import Database
-from naggy.models import Reminder
+from naggy.models import NfcTag, Reminder
 
 _HERE = Path(__file__).parent
 
@@ -154,6 +160,14 @@ def create_app(config_path: str) -> FastAPI:
             "age_days": age_days,
             "human": human,
             "status": r.status_at(now),
+        }
+
+    def tag_json(t: NfcTag) -> dict:
+        return {
+            "id": t.id,
+            "path": f"/t/{t.token}",
+            "created_local": local_str(t.created_at),
+            "last_scan_local": local_str(t.last_scan_at) if t.last_scan_at else None,
         }
 
     def board_view(now: int) -> dict:
@@ -314,6 +328,90 @@ def create_app(config_path: str) -> FastAPI:
         if wants_partial(request):
             return board_partial(request)
         return reminder_json(r, now)
+
+    # --- NFC tags ---------------------------------------------------------------
+
+    @app.get("/api/reminders/{reminder_id}/tags")
+    def list_tags(reminder_id: int):
+        return {"tags": [tag_json(t) for t in db.list_tags(reminder_id)]}
+
+    @app.post("/api/reminders/{reminder_id}/tags")
+    def add_tag(reminder_id: int):
+        """Mint a token for a new tag. The edit dialog then writes its URL onto
+        the tag with Web NFC — or, where the browser can't, shows it for copying
+        into an NFC writer app — and deletes it again if the write fails."""
+        # 9 random bytes -> 12 URL-safe chars: unguessable, and short enough that
+        # the whole URL fits the smallest common tags (NTAG213, 144 bytes).
+        token = secrets.token_urlsafe(9)
+        tag_id = db.add_tag(reminder_id, token, now_epoch())
+        if tag_id is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return tag_json(db.get_tag(token))
+
+    @app.delete("/api/reminders/{reminder_id}/tags/{tag_id}")
+    def delete_tag(reminder_id: int, tag_id: int):
+        ok = db.delete_tag(reminder_id, tag_id)
+        return JSONResponse({"ok": ok}, status_code=200 if ok else 404)
+
+    def scan_page(request: Request, state: str, token: str, r: Reminder | None = None,
+                  completion_id: int | None = None, status_code: int = 200) -> Response:
+        now = now_epoch()
+        return templates.TemplateResponse(
+            request,
+            "phone/scan.html",
+            {
+                "state": state,
+                "token": token,
+                "r": reminder_json(r, now) if r else None,
+                "completion_id": completion_id,
+            },
+            status_code=status_code,
+        )
+
+    @app.get("/t/{token}")
+    def scan_tag(request: Request, token: str):
+        """A tag was tapped. A GET that mutates, deliberately: it's what a tag's
+        URL produces, and asking for a tap to confirm would defeat the tag.
+
+        A completion redirects to its own result page (Post/Redirect/Get), so
+        reloading that page can't tick the chore off a second time.
+        """
+        tag = db.get_tag(token)
+        if tag is None:
+            return scan_page(request, "unknown", token, status_code=404)
+        now = now_epoch()
+        db.mark_tag_scanned(tag.id, now)
+        r = db.get_reminder(tag.reminder_id)
+        action = schedule.scan_action(r, now)
+        if action != "complete":
+            return scan_page(request, action, token, r)
+        _, completion_id = db.complete_with_id(r.id, now, tz)
+        return RedirectResponse(f"/t/{token}/done/{completion_id}", status_code=303)
+
+    def tag_completion(token: str, completion_id: int):
+        """The tag and completion a result URL names, if they belong together —
+        so a token can't be used to view or undo some other chore's completion."""
+        tag = db.get_tag(token)
+        c = db.get_completion(completion_id)
+        if tag is None or c is None or c.reminder_id != tag.reminder_id:
+            return None
+        return c
+
+    @app.get("/t/{token}/done/{completion_id}")
+    def scan_done(request: Request, token: str, completion_id: int):
+        c = tag_completion(token, completion_id)
+        if c is None:
+            # Gone already: undone, or the tag was removed since.
+            return scan_page(request, "gone", token)
+        return scan_page(request, "done", token, db.get_reminder(c.reminder_id), completion_id)
+
+    @app.post("/t/{token}/undo/{completion_id}")
+    def scan_undo(request: Request, token: str, completion_id: int):
+        c = tag_completion(token, completion_id)
+        r = db.undo_completion(completion_id) if c else None
+        if r is None:
+            return scan_page(request, "undo_failed", token, status_code=409)
+        return scan_page(request, "undone", token, r)
 
     # --- push subscriptions ---------------------------------------------------
 

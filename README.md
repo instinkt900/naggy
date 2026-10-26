@@ -36,6 +36,18 @@ needs. The board lists Pending items first, then Upcoming, then Last done. Tap a
 pending item anywhere to mark it done; the others have a ✕ to delete them.
 **Long-press** any reminder to edit its name, date, cadence and notes, or delete it.
 
+## NFC tags
+
+Stick an NFC tag near a chore and tap it with your phone to mark the chore done —
+no need to open the app. In a reminder's edit dialog, tap **Add a tag** and hold a
+blank (or re-used) tag to the back of the phone; Naggy writes its link onto it.
+That needs Chrome on Android and HTTPS; elsewhere the dialog shows the link to
+write with any NFC app. A reminder can have several tags.
+
+Scanning a tag marks a **pending** chore done and shows a page with **Undo**. A
+**Last done** chore is always marked done. A chore that isn't due yet is left
+alone, and the page says so.
+
 ## Commands
 
 ```

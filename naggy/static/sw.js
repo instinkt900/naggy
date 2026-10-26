@@ -119,6 +119,9 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/") || url.pathname === "/healthz") return;
+  // NFC scan pages report what a scan just did; a cached copy served offline
+  // would claim a chore was cleared when nothing happened.
+  if (url.pathname.startsWith("/t/")) return;
 
   // Same reasoning as install: bypass the HTTP cache for assets so the worker
   // can't re-cache something stale. Navigations are left alone — a Request in

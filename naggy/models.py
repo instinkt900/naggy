@@ -77,4 +77,22 @@ class Completion:
     reminder_id: int
     done_at: int
     was_due_at: int | None = None
+    prev_last_done_at: int | None = None  # the reminder's last_done_at before this; for undo
+    id: int | None = None
+
+
+@dataclass
+class NfcTag:
+    """A physical NFC tag linked to a reminder.
+
+    The tag itself holds only a URL, `/t/<token>`; tapping it with a phone opens
+    that URL, which ticks the chore off. `token` is random rather than the
+    reminder id so a guessable URL can't clear chores, and so one reminder can
+    have several tags, each removable on its own.
+    """
+
+    token: str
+    reminder_id: int
+    created_at: int = 0
+    last_scan_at: int | None = None
     id: int | None = None

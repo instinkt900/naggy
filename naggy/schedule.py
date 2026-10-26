@@ -2,9 +2,10 @@
 
 This is the deterministic heart of Naggy (the analogue of a pure "analysis"
 module): given a moment and a cadence it computes the next due time, and given a
-set of reminders and "now" it splits them into pending vs upcoming. Everything is
-a plain function taking its inputs as arguments (including the timezone), so it is
-trivially covered by the plain-assert tests in `tests/`.
+set of reminders and "now" it splits them into pending vs upcoming (and decides
+what an NFC tag scan should do with one). Everything is a plain function taking
+its inputs as arguments (including the timezone), so it is trivially covered by
+the plain-assert tests in `tests/`.
 
 Timestamps are UTC epoch seconds, but Naggy schedules by *date*: a chore is due on
 a day, not at a time of day. Every due moment is therefore the local midnight that
@@ -166,6 +167,23 @@ def board(reminders: list[Reminder], now: int) -> dict[str, list[Reminder]]:
     upcoming.sort(key=lambda r: r.due_at)          # soonest first
     open_ended.sort(key=lambda r: r.due_at)        # oldest last-done (smallest due_at) first
     return {"pending": pending, "upcoming": upcoming, "open": open_ended}
+
+
+def scan_action(r: Reminder, now: int) -> str:
+    """What tapping a reminder's NFC tag should do: `"complete"`, `"not_due"`
+    or `"archived"`.
+
+    A scan is a completion without the confirm dialog, so it only acts when a tap
+    on the board card would: a pending chore is ticked off, and a last-done chore
+    always is (it has no due date to wait for — tapping it is the whole point). A
+    chore that isn't due yet is left alone, so brushing past a tag mid-cycle can't
+    skip a cycle. An archived one-shot has nothing left to do.
+    """
+    if not r.active:
+        return "archived"
+    if r.kind == "open" or r.is_pending(now):
+        return "complete"
+    return "not_due"
 
 
 def notify_time(due_at: int, tz: ZoneInfo, hour: int, minute: int) -> int:

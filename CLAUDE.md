@@ -33,13 +33,13 @@ naggy/
   __main__.py    `python -m naggy`
   web.py         FastAPI app factory (create_app); all routes as closures; tz helpers
   db.py          SQLite schema + Database wrapper (short-lived connections)
-  models.py      dataclasses: Reminder, Completion, PushSubscription
+  models.py      dataclasses: Reminder, Completion, NfcTag, PushSubscription
   schedule.py    PURE maths: next_due, advance_due, start_of_day, due_from_date, days_until,
-                 days_since, board, due_for_notification, notify_time
+                 days_since, board, scan_action, due_for_notification, notify_time
   notify.py      Web Push: VAPID keys, pywebpush sending, the notify pass
   config.py      TOML loader; dataclasses; _known() rejects unknown keys; secrets from env only
   constants.py   KINDS, INTERVAL_UNITS, humanize_days, humanize_ago, _coarse_days
-  templates/     base.html, phone/index.html, partials/board.html
+  templates/     base.html, phone/index.html, phone/scan.html, partials/board.html
   static/        style.css, common.js, phone.js, sw.js, htmx.min.js (vendored), icons/
 docker/          Dockerfile, docker-compose.yml
 deploy/          install-server.sh
@@ -120,6 +120,9 @@ config.example.toml   the only tracked config; real config.toml is gitignored
   (open-ended reminders never appear in `pending` — they have no due date)
 - Write APIs: `POST /api/reminders`, `POST /api/reminders/{id}/complete`,
   `PATCH /api/reminders/{id}`, `DELETE /api/reminders/{id}`
+- NFC tags: `GET|POST /api/reminders/{id}/tags`, `DELETE /api/reminders/{id}/tags/{tag_id}`;
+  scans: `GET /t/{token}`, `GET /t/{token}/done/{completion_id}`,
+  `POST /t/{token}/undo/{completion_id}` (see **NFC tags** below)
 - Push: `GET /api/push/key`, `POST /api/push/subscribe`,
   `POST /api/push/unsubscribe`, `POST /api/push/test`
 - HTMX form posts return the re-rendered `partials/board.html` fragment (swap
@@ -145,6 +148,28 @@ config.example.toml   the only tracked config; real config.toml is gitignored
   htmx's form validation can't block it). It can't use `hx-patch`: htmx bakes the URL in when it processes the
   element, and the reminder id isn't known until a card is pressed.
 - `sw.js` is **network-first**, so code/template/static changes roll out on reload.
+
+## NFC tags
+
+- A tag holds only a URL, `/t/<token>` (`nfc_tags` table; random token, many per
+  reminder, cascade-deleted with it). Android opens the URL when the phone touches
+  the tag, so a scan is a plain page load — a **GET that mutates, on purpose**:
+  the point of a tag is not opening the app and confirming.
+- `schedule.scan_action` decides: pending → complete; **open ("Last done") →
+  always complete**; not yet due → nothing ("Not due — not cleared"); archived
+  one-shot → nothing. A completion **303s** to `/t/{token}/done/{cid}` so reloading
+  the result can't complete twice; that page offers **Undo**.
+- Undo (`db.undo_completion`) restores `due_at` (`completions.was_due_at`),
+  `last_done_at` (`completions.prev_last_done_at`) and `active = 1`, then deletes
+  the completion row. Only a reminder's **latest** completion can be undone, and
+  a result/undo URL only works if the completion belongs to that token's reminder.
+- Tags are written from the edit dialog with **Web NFC** (`NDEFReader.write`,
+  Chrome on Android over HTTPS only). The server mints the token first; a failed
+  or cancelled write deletes it again. Without Web NFC the dialog shows the URL
+  (and copies it) for an NFC writer app. Tag changes save immediately, not with
+  the dialog's Save.
+- `sw.js` never handles `/t/` — a cached scan page served offline would claim a
+  chore was cleared.
 
 ## Commands
 

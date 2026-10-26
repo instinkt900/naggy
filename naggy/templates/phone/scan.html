@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block body_class %}phone{% endblock %}
+
+{# What an NFC tag scan lands on (see the /t/ routes in web.py). The scan has
+   already acted by the time this renders, so the page only reports it, and a
+   completion gets an Undo: a plain form post, no HTMX, because there is no
+   board here to swap. #}
+{% block content %}
+<header class="app-header">
+  <h1>Naggy</h1>
+  <p class="tagline">NFC tag scan</p>
+</header>
+
+<main>
+  <section class="scan-result scan-{{ state }}">
+    {% if state == "done" %}
+      <p class="scan-mark">✓</p>
+      <h2>Done</h2>
+      <p class="scan-title">{{ r.title }}</p>
+      <p class="scan-detail">
+        {% if r.kind == "recurring" %}Next due {{ r.due_local }} ({{ r.human }}).
+        {% elif r.kind == "open" %}Marked done today.
+        {% else %}Cleared — it's off the board.{% endif %}
+      </p>
+      <form method="post" action="/t/{{ token }}/undo/{{ completion_id }}">
+        <button type="submit" class="ghost">Undo</button>
+      </form>
+    {% elif state == "not_due" %}
+      <p class="scan-mark">–</p>
+      <h2>Not due — not cleared</h2>
+      <p class="scan-title">{{ r.title }}</p>
+      <p class="scan-detail">It's due {{ r.due_local }} ({{ r.human }}). Scan the tag again once it is.</p>
+    {% elif state == "archived" %}
+      <p class="scan-mark">–</p>
+      <h2>Already cleared</h2>
+      <p class="scan-title">{{ r.title }}</p>
+      <p class="scan-detail">This one-off has already been done, so there's nothing to clear.</p>
+    {% elif state == "undone" %}
+      <p class="scan-mark">↶</p>
+      <h2>Undone</h2>
+      <p class="scan-title">{{ r.title }}</p>
+      <p class="scan-detail">
+        {% if r.status == "pending" %}It's back to pending ({{ r.human }}).
+        {% elif r.kind == "open" %}Last done {{ r.human }}, as before.
+        {% else %}Back to due {{ r.due_local }}.{% endif %}
+      </p>
+    {% elif state == "undo_failed" %}
+      <p class="scan-mark">!</p>
+      <h2>Couldn't undo</h2>
+      <p class="scan-detail">It has already been undone, or the chore has been done again since.</p>
+    {% elif state == "gone" %}
+      <p class="scan-mark">–</p>
+      <h2>Nothing to show</h2>
+      <p class="scan-detail">That scan has been undone, or its tag has been removed.</p>
+    {% else %}
+      <p class="scan-mark">?</p>
+      <h2>Unknown tag</h2>
+      <p class="scan-detail">This tag isn't linked to any chore. It may have been removed from its reminder.</p>
+    {% endif %}
+  </section>
+
+  <a class="scan-home" href="/">Open Naggy</a>
+</main>
+{% endblock %}

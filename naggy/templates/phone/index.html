@@ -142,6 +142,17 @@
       <input type="text" name="notes" autocomplete="off">
     </label>
 
+    {# Tags are saved as soon as they're written, not with the Save button: the
+       tag physically holds its URL by then, whatever happens to the edit. The
+       list is fetched when the dialog opens (see loadTags in phone.js). #}
+    <div class="field" id="edit-tags">
+      <span>NFC tags</span>
+      <ul class="tags-list" id="tags-list"></ul>
+      <p class="tags-empty" id="tags-empty" hidden>No tags yet. Scanning a tag marks this chore done.</p>
+      <button type="button" class="ghost" id="tag-add">Add a tag</button>
+      <p class="tags-status" id="tags-status"></p>
+    </div>
+
     <p class="modal-error" id="edit-error"></p>
 
     <div class="modal-actions">

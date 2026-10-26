@@ -304,3 +304,71 @@ button.ghost:disabled { color: var(--muted); cursor: default; }
 
 .modal-error { margin: 0; color: var(--danger); font-size: 0.82rem; }
 .modal-error:empty { display: none; }
+
+/* --- NFC scan result page --- */
+.scan-result {
+  margin-top: 28px;
+  padding: 26px 18px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+.scan-result h2 {
+  justify-content: center;
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: -0.01em;
+}
+.scan-mark {
+  margin: 0 auto 10px;
+  width: 64px;
+  height: 64px;
+  line-height: 64px;
+  border-radius: 50%;
+  font-size: 2rem;
+  font-weight: 700;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.scan-done .scan-mark { background: rgba(62, 207, 142, 0.15); color: var(--ok); }
+.scan-not_due .scan-mark { background: var(--pending-bg); color: var(--pending); }
+.scan-undo_failed .scan-mark, .scan-unknown .scan-mark { color: var(--danger); }
+.scan-title { margin: 0 0 6px; font-size: 1.05rem; font-weight: 600; }
+.scan-detail { margin: 0 0 18px; color: var(--muted); font-size: 0.92rem; }
+.scan-result form { margin: 0; }
+.scan-home {
+  display: block;
+  margin: 18px auto 0;
+  text-align: center;
+  color: var(--accent);
+  font-size: 0.95rem;
+}
+
+/* --- NFC tags in the edit dialog --- */
+.tags-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tags-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.85rem;
+}
+.tags-list li span { flex: 1; color: var(--muted); }
+.tags-list .tag-del {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font: inherit;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.tags-empty { margin: 0; font-size: 0.82rem; color: var(--muted); }
+.tags-status { margin: 0; font-size: 0.82rem; color: var(--muted); word-break: break-all; }
+.tags-status:empty { display: none; }
+.modal button.ghost { background: var(--surface-2); }

@@ -6,7 +6,7 @@ The whole schema is a single `_SCHEMA` string of `CREATE ... IF NOT EXISTS`
 statements; `init_db(tz)` runs it (plus any pending migrations — guarded
 `ALTER TABLE`s for columns, a `PRAGMA user_version` bump for row rewrites) on
 every startup, so it is idempotent and forward-only. Rows map to/from the
-dataclasses in `models.py` via the `_reminder` / `_completion` helpers.
+dataclasses in `models.py` via the `_reminder` / `_completion` / `_tag` helpers.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from naggy import schedule
-from naggy.models import Completion, PushSubscription, Reminder
+from naggy.models import Completion, NfcTag, PushSubscription, Reminder
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS reminders (
@@ -49,9 +49,19 @@ CREATE TABLE IF NOT EXISTS completions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     reminder_id INTEGER NOT NULL REFERENCES reminders(id) ON DELETE CASCADE,
     done_at     INTEGER NOT NULL,
-    was_due_at  INTEGER
+    was_due_at  INTEGER,
+    prev_last_done_at INTEGER                              -- last_done_at before this, for undo
 );
 CREATE INDEX IF NOT EXISTS idx_completions_reminder ON completions(reminder_id, done_at);
+
+CREATE TABLE IF NOT EXISTS nfc_tags (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    token        TEXT    NOT NULL UNIQUE,                  -- the secret in the tag's URL
+    reminder_id  INTEGER NOT NULL REFERENCES reminders(id) ON DELETE CASCADE,
+    created_at   INTEGER NOT NULL,
+    last_scan_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_nfc_tags_reminder ON nfc_tags(reminder_id);
 """
 
 # Schema version for data migrations that can't be detected by inspection.
@@ -88,6 +98,8 @@ class Database:
             # `_SCHEMA` carries the same columns so fresh installs skip all of this.
             if not self._has_column(conn, "reminders", "notified_at"):
                 conn.execute("ALTER TABLE reminders ADD COLUMN notified_at INTEGER")
+            if not self._has_column(conn, "completions", "prev_last_done_at"):
+                conn.execute("ALTER TABLE completions ADD COLUMN prev_last_done_at INTEGER")
             self._migrate_data(conn, tz)
 
     def _migrate_data(self, conn: sqlite3.Connection, tz: ZoneInfo) -> None:
@@ -170,19 +182,32 @@ class Database:
         """Address a reminder in one transaction: log the completion, then reset a
         recurring reminder's timer, move an open-ended one to "done today", or
         archive a one-shot. Returns the updated reminder (inactive if archived),
-        or None if it doesn't exist."""
+        or None if it doesn't exist.
+
+        The completion row keeps the reminder's prior `due_at` and `last_done_at`,
+        which is everything `undo_completion` needs to put it back."""
+        r, _ = self.complete_with_id(reminder_id, now, tz)
+        return r
+
+    def complete_with_id(
+        self, reminder_id: int, now: int, tz: ZoneInfo
+    ) -> tuple[Reminder | None, int | None]:
+        """`complete_reminder`, also returning the new completion's id — an NFC
+        scan hands it to the result page so its Undo knows what to reverse."""
         with self.connect() as conn:
             row = conn.execute(
                 "SELECT * FROM reminders WHERE id = ?", (reminder_id,)
             ).fetchone()
             if row is None:
-                return None
+                return None, None
             r = _reminder(row)
 
-            conn.execute(
-                "INSERT INTO completions (reminder_id, done_at, was_due_at) VALUES (?, ?, ?)",
-                (reminder_id, now, r.due_at),
+            cur = conn.execute(
+                """INSERT INTO completions (reminder_id, done_at, was_due_at, prev_last_done_at)
+                   VALUES (?, ?, ?, ?)""",
+                (reminder_id, now, r.due_at, r.last_done_at),
             )
+            completion_id = int(cur.lastrowid)
 
             if r.kind == "open":
                 # No cadence to advance and nothing to archive: the "due" date is
@@ -211,7 +236,45 @@ class Database:
                     "UPDATE reminders SET active = 0, last_done_at = ? WHERE id = ?",
                     (now, reminder_id),
                 )
-            return r
+            return r, completion_id
+
+    def get_completion(self, completion_id: int) -> Completion | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM completions WHERE id = ?", (completion_id,)
+            ).fetchone()
+        return _completion(row) if row else None
+
+    def undo_completion(self, completion_id: int) -> Reminder | None:
+        """Reverse a completion: restore the reminder's due date, last-done date
+        and active flag as they were, and drop the log row.
+
+        Only the reminder's *latest* completion can be undone — reversing an older
+        one would rewind the chore past things done since. Returns the restored
+        reminder, or None when there's nothing (left) to undo.
+        """
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM completions WHERE id = ?", (completion_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            latest = conn.execute(
+                "SELECT MAX(id) FROM completions WHERE reminder_id = ?", (row["reminder_id"],)
+            ).fetchone()[0]
+            if latest != completion_id:
+                return None
+            # A one-shot was archived by its completion; every kind was active
+            # before one, so un-archiving is right for all of them.
+            conn.execute(
+                "UPDATE reminders SET due_at = ?, last_done_at = ?, active = 1 WHERE id = ?",
+                (row["was_due_at"], row["prev_last_done_at"], row["reminder_id"]),
+            )
+            conn.execute("DELETE FROM completions WHERE id = ?", (completion_id,))
+            r = conn.execute(
+                "SELECT * FROM reminders WHERE id = ?", (row["reminder_id"],)
+            ).fetchone()
+        return _reminder(r) if r else None
 
     def update_reminder(self, reminder_id: int, fields: dict) -> bool:
         cols = {k: v for k, v in fields.items() if k in _UPDATABLE and v is not None}
@@ -238,6 +301,43 @@ class Database:
             conn.execute(
                 "UPDATE reminders SET notified_at = ? WHERE id = ?", (now, reminder_id)
             )
+
+    # --- NFC tags ---------------------------------------------------------------
+
+    def add_tag(self, reminder_id: int, token: str, now: int) -> int | None:
+        """Link a new tag token to a reminder; None if the reminder doesn't exist."""
+        with self.connect() as conn:
+            if conn.execute("SELECT 1 FROM reminders WHERE id = ?", (reminder_id,)).fetchone() is None:
+                return None
+            cur = conn.execute(
+                "INSERT INTO nfc_tags (token, reminder_id, created_at) VALUES (?, ?, ?)",
+                (token, reminder_id, now),
+            )
+            return int(cur.lastrowid)
+
+    def get_tag(self, token: str) -> NfcTag | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM nfc_tags WHERE token = ?", (token,)).fetchone()
+        return _tag(row) if row else None
+
+    def list_tags(self, reminder_id: int) -> list[NfcTag]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM nfc_tags WHERE reminder_id = ? ORDER BY created_at, id",
+                (reminder_id,),
+            ).fetchall()
+        return [_tag(r) for r in rows]
+
+    def delete_tag(self, reminder_id: int, tag_id: int) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM nfc_tags WHERE id = ? AND reminder_id = ?", (tag_id, reminder_id)
+            )
+            return cur.rowcount > 0
+
+    def mark_tag_scanned(self, tag_id: int, now: int) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE nfc_tags SET last_scan_at = ? WHERE id = ?", (now, tag_id))
 
     # --- push subscriptions ----------------------------------------------------
 
@@ -323,5 +423,16 @@ def _completion(row: sqlite3.Row) -> Completion:
         reminder_id=row["reminder_id"],
         done_at=row["done_at"],
         was_due_at=row["was_due_at"],
+        prev_last_done_at=row["prev_last_done_at"],
+        id=row["id"],
+    )
+
+
+def _tag(row: sqlite3.Row) -> NfcTag:
+    return NfcTag(
+        token=row["token"],
+        reminder_id=row["reminder_id"],
+        created_at=row["created_at"],
+        last_scan_at=row["last_scan_at"],
         id=row["id"],
     )
