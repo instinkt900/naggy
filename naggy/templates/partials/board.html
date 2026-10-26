@@ -1,11 +1,13 @@
-{# data-pending drives the home-screen icon badge; see syncBadge in phone.js.
+{# data-pending and data-notification keep the home-screen icon badge and the
+   notification shade in step with the board; see syncBadge in phone.js.
    Each card also carries its own fields as data-* attributes: a long press
    reads them straight into the edit dialog, so opening the editor costs no
    round trip and can't show anything the board doesn't.
    A pending card is one big button that ticks the chore off: no ✕ to hit by
    mistake beside it (deleting one is in the edit dialog). The other cards keep
    theirs. #}
-<div id="board" class="board" data-pending="{{ board.pending|length }}">
+<div id="board" class="board" data-pending="{{ board.pending|length }}"
+     data-notification='{{ board.notification|tojson }}'>
   <section class="pending">
     <h2>Pending actions {% if board.pending %}<span class="count">{{ board.pending|length }}</span>{% endif %}</h2>
     {% if board.pending %}

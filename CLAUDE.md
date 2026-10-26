@@ -35,7 +35,8 @@ naggy/
   db.py          SQLite schema + Database wrapper (short-lived connections)
   models.py      dataclasses: Reminder, Completion, NfcTag, PushSubscription
   schedule.py    PURE maths: next_due, advance_due, start_of_day, due_from_date, days_until,
-                 days_since, board, scan_action, due_for_notification, notify_time
+                 days_since, board, scan_action, notified_pending, due_for_notification,
+                 notify_time
   notify.py      Web Push: VAPID keys, pywebpush sending, the notify pass
   config.py      TOML loader; dataclasses; _known() rejects unknown keys; secrets from env only
   constants.py   KINDS, INTERVAL_UNITS, humanize_days, humanize_ago, _coarse_days
@@ -170,6 +171,15 @@ config.example.toml   the only tracked config; real config.toml is gitignored
   the dialog's Save.
 - `sw.js` never handles `/t/` — a cached scan page served offline would claim a
   chore was cleared.
+- A scan never goes through a push, so the **page** tidies the notification: the
+  scan page and the board both carry `notification_state` (web.py) — the silent
+  repost payload for `schedule.notified_pending` (pending *and* already pushed
+  this cycle), or null — and `NG.syncNotification` hands it to the worker's
+  `sync-pending` handler. Null closes `naggy-pending`; otherwise a notification
+  still on screen is replaced quietly, and one the user swiped away stays gone
+  unless `restore` is set — which an undo does when the chore it put back had
+  been nagged about. (The notify pass can't do this: undo keeps `notified_at`, so
+  the restored cycle already counts as notified.)
 
 ## Commands
 

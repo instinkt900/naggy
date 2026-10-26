@@ -62,21 +62,23 @@ self.addEventListener("push", (e) => {
   // be made non-dismissible; Android's ongoing flag isn't exposed to us.
   if (typeof d.badge_count === "number") setBadge(d.badge_count);
 
-  e.waitUntil(
-    self.registration.showNotification(d.title || "Naggy", {
-      body: d.body || "Something needs doing.",
-      icon: "/static/icons/icon-192.png",
-      // Android reduces `badge` to its alpha channel and paints it white for the
-      // status bar, so this one has to be the bare bell on transparency — point
-      // it at an opaque icon and you get a featureless white square.
-      badge: "/static/icons/icon-badge-96.png",
-      tag: d.tag || "naggy",         // replaces the previous nag instead of stacking
-      renotify: d.renotify !== false, // reposts replace quietly; only the first alerts
-      silent: d.silent === true,
-      data: { url: d.url || "/" },
-    })
-  );
+  e.waitUntil(showNag(d));
 });
+
+function showNag(d) {
+  return self.registration.showNotification(d.title || "Naggy", {
+    body: d.body || "Something needs doing.",
+    icon: "/static/icons/icon-192.png",
+    // Android reduces `badge` to its alpha channel and paints it white for the
+    // status bar, so this one has to be the bare bell on transparency — point
+    // it at an opaque icon and you get a featureless white square.
+    badge: "/static/icons/icon-badge-96.png",
+    tag: d.tag || "naggy",         // replaces the previous nag instead of stacking
+    renotify: d.renotify !== false, // reposts replace quietly; only the first alerts
+    silent: d.silent === true,
+    data: { url: d.url || "/" },
+  });
+}
 
 function setBadge(count) {
   // Not universally implemented, and it throws rather than no-ops where it isn't.
@@ -88,15 +90,23 @@ function setBadge(count) {
   }
 }
 
+// A page (the board, or an NFC scan result) reporting what is outstanding now —
+// see NG.syncNotification. No notification left means close it. Otherwise one
+// still on screen is replaced, silently, so it stops listing a chore that's been
+// done; one the user swiped away stays gone, unless `restore` says an undo has
+// just put back a chore they had been nagged about.
 self.addEventListener("message", (e) => {
-  if (e.data && e.data.action === "dismiss-pending") {
-    e.waitUntil(
-      self.registration.getNotifications({ tag: "naggy-pending" }).then((notifs) => {
-        notifs.forEach((n) => n.close());
+  const d = e.data || {};
+  if (d.action !== "sync-pending") return;
+  if (typeof d.badge === "number") setBadge(d.badge);
+  e.waitUntil(
+    self.registration.getNotifications({ tag: "naggy-pending" })
+      .then((shown) => {
+        if (!d.notification) return shown.forEach((n) => n.close());
+        if (shown.length || d.restore) return showNag(d.notification);
       })
-    );
-    setBadge(0);
-  }
+      .catch(() => {}) // no notification permission: nothing to sync
+  );
 });
 
 self.addEventListener("notificationclick", (e) => {

@@ -142,6 +142,26 @@ def test_only_the_latest_completion_can_be_undone():
     assert db.undo_completion(first) is None
 
 
+# --- the notification after a scan -----------------------------------------------
+
+
+def test_scan_takes_a_chore_out_of_the_notification_and_undo_puts_it_back():
+    # The notify pass won't re-push an undone chore (its notified_at still covers
+    # the restored cycle), so the scan page has to — via notified_pending.
+    db = _db()
+    rid = _add(db, title="water plants", kind="recurring", interval_n=1, interval_unit="week",
+               due_at=TODAY)
+    db.mark_notified(rid, TODAY + 8 * 3600)
+    assert [r.id for r in schedule.notified_pending(db.list_active(), NOW)] == [rid]
+
+    _, cid = db.complete_with_id(rid, NOW, MELB)
+    assert schedule.notified_pending(db.list_active(), NOW) == []
+
+    db.undo_completion(cid)
+    assert [r.id for r in schedule.notified_pending(db.list_active(), NOW)] == [rid]
+    assert schedule.due_for_notification(db.list_active(), NOW) == []
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

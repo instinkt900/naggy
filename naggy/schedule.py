@@ -186,6 +186,30 @@ def scan_action(r: Reminder, now: int) -> str:
     return "not_due"
 
 
+def notified_pending(reminders: list[Reminder], now: int) -> list[Reminder]:
+    """Pending reminders the user has already been pushed about this cycle — what
+    the notification shade should be showing right now.
+
+    The page uses it to bring the notification into line after a chore changes
+    outside a push: ticking one off leaves the rest (or nothing, so it closes),
+    and undoing a scan puts the chore back. Undo restores `due_at` but never
+    touches `notified_at`, so a chore that was nagged about before the scan still
+    counts as nagged about after the undo — which is why the notify pass won't
+    re-push it, and why the page has to.
+
+    A chore that's pending but not yet pushed (before `notify_at`, say) is left
+    out: it's the pass's job to announce it, with sound.
+
+    Same ordering as `board`: most overdue first.
+    """
+    out = [
+        r for r in reminders
+        if r.is_pending(now) and r.notified_at is not None and r.notified_at >= r.due_at
+    ]
+    out.sort(key=lambda r: r.due_at)
+    return out
+
+
 def notify_time(due_at: int, tz: ZoneInfo, hour: int, minute: int) -> int:
     """First moment at or after `due_at` whose local clock reads `hour:minute`.
 

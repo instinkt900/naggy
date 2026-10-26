@@ -226,6 +226,26 @@ def test_payload_body_is_bounded():
     assert len(p["body"]) <= 300, len(p["body"])
 
 
+# --- notified_pending (what the shade should show) ------------------------------
+
+
+def test_notified_pending_is_what_has_been_pushed_and_is_still_due():
+    rems = [
+        _r("pushed", NOW - DAY, notified_at=NOW - 10),
+        _r("not pushed yet", NOW - 10),
+        _r("pushed last cycle", NOW - 10, notified_at=NOW - DAY),
+        _r("upcoming", NOW + DAY, notified_at=NOW - 10),
+        _r("archived", NOW - DAY, notified_at=NOW - 10, active=False),
+    ]
+    got = schedule.notified_pending(rems, NOW)
+    assert [r.title for r in got] == ["pushed"], got
+
+
+def test_notified_pending_most_overdue_first():
+    rems = [_r("b", NOW - 10, notified_at=NOW), _r("a", NOW - DAY, notified_at=NOW)]
+    assert [r.title for r in schedule.notified_pending(rems, NOW)] == ["a", "b"]
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

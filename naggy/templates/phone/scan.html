@@ -61,4 +61,7 @@
 
   <a class="scan-home" href="/">Open Naggy</a>
 </main>
+{# Read by common.js on load: brings the notification shade into line with what
+   the scan (or its undo) just did. #}
+<script type="application/json" id="notification-state">{{ notification|tojson }}</script>
 {% endblock %}

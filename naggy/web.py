@@ -170,12 +170,35 @@ def create_app(config_path: str) -> FastAPI:
             "last_scan_local": local_str(t.last_scan_at) if t.last_scan_at else None,
         }
 
+    def notification_state(active: list[Reminder], now: int, restore_id: int | None = None) -> dict:
+        """What the notification shade should show, for the page to hand to the
+        service worker (`sync-pending` in sw.js) — a chore ticked off in the app or
+        by a tag never goes through a push, so nothing else would tidy it up.
+
+        `notification` is the payload a repost would carry (silent: this only
+        brings an existing notification up to date), or None to close it.
+        `restore` asks for it to be shown even if it's no longer on screen — set
+        when an undo has just put back a chore the user had been nagged about.
+        """
+        shown = schedule.notified_pending(active, now)
+        pending = schedule.board(active, now)["pending"]
+        payload = None
+        if shown and vapid_public_key:
+            payload = notify.build_payload(shown, now, tz, repost=True, badge_count=len(pending))
+        return {
+            "notification": payload,
+            "badge": len(pending),
+            "restore": payload is not None and any(r.id == restore_id for r in shown),
+        }
+
     def board_view(now: int) -> dict:
-        b = schedule.board(db.list_active(), now)
+        active = db.list_active()
+        b = schedule.board(active, now)
         return {
             "pending": [reminder_json(r, now) for r in b["pending"]],
             "upcoming": [reminder_json(r, now) for r in b["upcoming"]],
             "open": [reminder_json(r, now) for r in b["open"]],
+            "notification": notification_state(active, now),
         }
 
     def wants_partial(request: Request) -> bool:
@@ -364,6 +387,12 @@ def create_app(config_path: str) -> FastAPI:
                 "token": token,
                 "r": reminder_json(r, now) if r else None,
                 "completion_id": completion_id,
+                # A scan lands in a browser tab, not the board, so this page is
+                # what has to dismiss the chore's notification (or, after an
+                # undo, bring it back).
+                "notification": notification_state(
+                    db.list_active(), now, r.id if r and state == "undone" else None
+                ),
             },
             status_code=status_code,
         )

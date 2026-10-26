@@ -386,18 +386,21 @@
 
   // --- home-screen icon badge -------------------------------------------------
 
-  // Kept in step with the board on every swap, so clearing the last pending chore
-  // clears the badge immediately rather than waiting for the next push.
+  // Kept in step with the board on every swap, so ticking a chore off updates the
+  // badge and the notification immediately rather than waiting for the next push.
   function syncBadge() {
     const board = document.getElementById("board");
     if (!board) return;
-    const n = parseInt(board.dataset.pending || "0", 10) || 0;
-    if (n === 0 && navigator.serviceWorker && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({ action: "dismiss-pending" });
+    let state;
+    try {
+      state = JSON.parse(board.dataset.notification || "null");
+    } catch (_) {
+      state = null;
     }
-    if (!navigator.setAppBadge) return;
-    const p = n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge();
-    if (p && p.catch) p.catch(() => {});
+    if (!state) {
+      state = { notification: null, badge: parseInt(board.dataset.pending || "0", 10) || 0 };
+    }
+    NG.syncNotification(state);
   }
 
   // --- push notifications ---------------------------------------------------
